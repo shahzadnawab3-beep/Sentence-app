@@ -144,7 +144,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 </div>
 
 <div class="top">
-  <span class="brand">Bol Ke Seekho</span>
+  <span class="brand">Bol Ke Seekho <small style="font-weight:500;color:var(--muted);font-size:.7rem">v4</small></span>
   <span class="count"><b id="pos">1</b> / <span id="total">0</span></span>
   <button class="icon-btn" id="menuBtn" aria-label="Menu">☰</button>
 </div>
@@ -212,7 +212,20 @@ function targetSlots(en){
   en=(en||'').replace(/[’‘]/g,"'").replace(/\b(it|that|there|what|he|she|who|here|where|how)'s\b/gi,'$1 is/has').replace(/(\w)'d\b/g,'$1 would/had');
   return norm(en).map(w=>w.split('/').filter(Boolean));
 }
-function spokenWords(t){ return norm(t).flatMap(w=>w.split('/')).filter(Boolean); }
+function dedupe(w){
+  // Android sometimes repeats words or the whole sentence: "i i got you", "i got you i got you"
+  w=w.filter((x,i)=>i===0||x!==w[i-1]);
+  let changed=true;
+  while(changed){ changed=false;
+    for(let k=Math.floor(w.length/2);k>=2&&!changed;k--){
+      for(let i=0;i+2*k<=w.length;i++){
+        if(w.slice(i,i+k).join(' ')===w.slice(i+k,i+2*k).join(' ')){ w=w.slice(0,i+k).concat(w.slice(i+2*k)); changed=true; break; }
+      }
+    }
+  }
+  return w;
+}
+function spokenWords(t){ return dedupe(norm(t).flatMap(w=>w.split('/')).filter(Boolean)); }
 function matches(slots, words){
   for(let s=0; s+slots.length<=words.length; s++){
     let ok=true;
@@ -335,7 +348,7 @@ async function gStart(){
   const mute=G.ctx.createGain(); mute.gain.value=0;
   G.src.connect(G.node); G.node.connect(mute); mute.connect(G.ctx.destination);
   G.node.onaudioprocess=e=>gFrame(new Float32Array(e.inputBuffer.getChannelData(0)));
-  G.on=true; $('levelWrap').hidden=false; setStatus('Listening… say it in English',true); return true;
+  G.on=true; $('levelWrap').hidden=false; setStatus('Listening (Gemini)… say it in English',true); return true;
 }
 function gStop(){
   G.on=false; $('levelWrap').hidden=true;
@@ -360,7 +373,7 @@ function gFrame(buf){
     G.quiet = v<stopT ? G.quiet+frameSec : 0;
     const len=G.rec.length*frameSec;
     if(G.quiet>=0.95 || len>14){ const chunks=G.rec; G.rec=[]; G.speaking=false; G.loud=0;
-      if(len-G.quiet>0.35) gSend(chunks); else setStatus('Listening… say it in English',true); }
+      if(len-G.quiet>0.35) gSend(chunks); else setStatus('Listening (Gemini)… say it in English',true); }
   }
 }
 function toWav(chunks, inRate){
@@ -389,21 +402,21 @@ async function gSend(chunks){
     if(cfg.gemOn && r.correct){ advance('ok',true); return; }
     setVerdict('✗ Not quite. '+(r.tip||'Try again.'),'bad');
   }catch(e){ setVerdict(e.message,'bad'); }
-  finally{ G.sending=false; if(G.on) setStatus('Listening… say it in English',true); }
+  finally{ G.sending=false; if(G.on) setStatus('Listening (Gemini)… say it in English',true); }
 }
 
 // ---------- phone speech ----------
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 let rec=null, wantOn=false, wakeLock=null, baseIndex=0, lastFinal='', restartTimer=null;
 function setStatus(t,on){ $('status').textContent=t; $('heardBox').classList.toggle('listening',!!on); }
-function markNewSentence(){ baseIndex = rec && rec._len ? rec._len : 0; lastFinal=''; if(wantOn && !rec) startRec(); if(G.on) setStatus('Listening… say it in English',true); }
+function markNewSentence(){ baseIndex = rec && rec._len ? rec._len : 0; lastFinal=''; if(wantOn && !rec) startRec(); if(G.on) setStatus('Listening (Gemini)… say it in English',true); }
 
 function startRec(){
   if(!SR||!wantOn) return;
   if(rec){ rec.onend=null; rec.onresult=null; rec.onerror=null; try{rec.abort();}catch(e){} }
   const r=new SR(); rec=r; r._len=0; baseIndex=0;
   r.lang=cfg.lang; r.interimResults=true; r.maxAlternatives=5; r.continuous=false;
-  r.onstart=()=>setStatus('Listening… say it in English',true);
+  r.onstart=()=>setStatus('Listening (phone)… say it in English',true);
   r.onresult=e=>onResult(e);
   r.onerror=e=>{
     if(e.error==='not-allowed'||e.error==='service-not-allowed'){ wantOn=false; showErr('Microphone is blocked. Tap the lock icon next to the address, allow Microphone, then reload.'); }
@@ -438,8 +451,8 @@ function onResult(e){
     if(/(^| )(show words|show answer)$/.test(k)){ showWords(); }
     if(matches(slots,w)){ $('heard').innerHTML=markHeard(slots,w); setVerdict('✓ Exact!','good'); advance('ok'); return; }
   }
-  const latest=(finals.slice(-1)[0]||'')+' '+interim;
-  $('heard').innerHTML=markHeard(slots,spokenWords(joined.length>120?latest:joined));
+  const lastR=e.results[e.results.length-1];
+  $('heard').innerHTML=markHeard(slots,spokenWords(lastR[0].transcript));
   // when a phrase is finished and not exact, ask Gemini about the meaning
   const last=e.results[e.results.length-1];
   if(last.isFinal){ const said=finals.slice(-1)[0]; if(said && said!==lastFinal){ lastFinal=said; checkWithGemini(said); } }
