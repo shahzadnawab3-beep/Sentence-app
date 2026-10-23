@@ -78,6 +78,8 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .verdict{font-size:.9rem;margin:6px 0 0;color:var(--muted)}
 .verdict.good{color:var(--accent);font-weight:600}
 .verdict.bad{color:var(--warn)}
+.level{height:5px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px}
+.level i{display:block;height:100%;width:0;background:var(--live);transition:width .08s linear}
 .tap-hint{text-align:center;font-size:.75rem;color:var(--muted);margin:0}
 .field{display:flex;flex-direction:column;gap:6px}
 .field label{font-size:.85rem;color:var(--muted)}
@@ -95,7 +97,8 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
   <p class="urt">اردو پڑھیں، انگریزی میں بولیں</p>
   <ul>
     <li>Read the Urdu sentence and say it in English.</li>
-    <li>Exact words move you ahead. With Gemini on, your own words are accepted if the meaning is right.</li>
+    <li>Exact words move you ahead. With Gemini, your own words are accepted if the meaning is right.</li>
+    <li>Speak clearly, then pause. The app checks when you stop talking.</li>
     <li>Tap the Urdu card to see the real English words.</li>
     <li>Say <b>"skip"</b> to skip.</li>
   </ul>
@@ -118,14 +121,19 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
   <button id="restartBtn">Start again from 1</button>
 
   <h1 style="font-size:1.3rem;margin-top:8px">Settings</h1>
-  <div class="field"><label for="langSel">Listening accent</label>
+  <div class="field"><label for="engSel">Who listens to me</label>
+    <select id="engSel">
+      <option value="gemini">Gemini (best for my accent, needs key)</option>
+      <option value="phone">Phone (free, less accurate)</option>
+    </select></div>
+  <div class="field"><label for="langSel">Phone listening accent</label>
     <select id="langSel">
       <option value="en-IN">English (India / Pakistan accent) – recommended</option>
       <option value="en-PK">English (Pakistan)</option>
       <option value="en-US">English (US)</option>
       <option value="en-GB">English (UK)</option>
     </select></div>
-  <label class="check"><input type="checkbox" id="gemOn"> Use Gemini to accept my own words</label>
+  <label class="check"><input type="checkbox" id="gemOn"> Accept my own words if the meaning is right</label>
   <div class="field"><label for="gemKey">Gemini API key (saved only on this phone)</label>
     <input id="gemKey" type="password" autocomplete="off" placeholder="Paste your key here"></div>
   <div class="field"><label for="gemModel">Gemini model</label>
@@ -151,6 +159,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
   <p class="words" id="words" hidden><small>English</small><span id="wordsText"></span></p>
   <section class="heard" id="heardBox">
     <div class="lbl"><span class="dot"></span><span id="status">Not listening</span></div>
+    <div class="level" id="levelWrap" hidden><i id="level"></i></div>
     <p id="heard"></p>
     <p class="verdict" id="verdict"></p>
   </section>
@@ -171,7 +180,7 @@ const KEY='bks-progress-v1', SKEY='bks-settings-v1';
 function lget(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
 function lset(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 let st = lget(KEY) || { queue: SENTENCES.map(s=>s.n), pos: 0, done: {}, skipped: {}, round: 1 };
-let cfg = Object.assign({ lang:'en-IN', gemOn:false, gemKey:'', gemModel:'gemini-flash-latest' }, lget(SKEY)||{});
+let cfg = Object.assign({ engine:'gemini', lang:'en-IN', gemOn:true, gemKey:'', gemModel:'gemini-flash-latest' }, lget(SKEY)||{});
 function save(){ lset(KEY, st); }
 
 // ---------- text matching ----------
@@ -292,17 +301,108 @@ async function checkWithGemini(said){
   finally{ gemBusy=false; }
 }
 
-// ---------- speech ----------
+
+async function geminiListen(wavB64, urdu, ref){
+  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.gemModel||'gemini-flash-latest')}:generateContent`;
+  const prompt=`A Pakistani learner is practising English. They see this Urdu sentence and say its English translation aloud.
+Urdu sentence: ${urdu}
+Reference English: ${ref}
+The audio is the learner speaking. Tasks:
+1. "heard": write exactly the English words the learner actually said (do not correct their grammar, do not copy the reference unless they said it). If they only said "skip", write "skip". If the audio has no clear speech, write "".
+2. "correct": true if what they said is a correct English translation with the same meaning as the Urdu (different wording and synonyms are fine, small grammar slips are fine); false if the meaning is changed, incomplete or missing.
+3. "tip": if not correct, a very short hint in simple English; else "".
+Reply only with JSON: {"heard": "...", "correct": true/false, "tip": "..."}`;
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':cfg.gemKey},
+    body:JSON.stringify({contents:[{parts:[{text:prompt},{inline_data:{mime_type:'audio/wav',data:wavB64}}]}],
+      generationConfig:{temperature:0,responseMimeType:'application/json'}})});
+  if(!res.ok){ const t=await res.text(); const err=new Error(res.status===429?'Gemini is busy (too many tries). Wait a few seconds.':res.status+': '+t.slice(0,140)); err.status=res.status; throw err; }
+  const j=await res.json();
+  const txt=j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'{}';
+  return JSON.parse(txt.replace(/```json|```/g,'').trim());
+}
+
+// ---------- Gemini listening: hear when I speak, record, send ----------
+const G={ctx:null,stream:null,node:null,src:null,an:null,on:false,ring:[],rec:[],speaking:false,loud:0,quiet:0,noise:0.006,sending:false,rate:48000};
+function rms(buf){ let s=0; for(let i=0;i<buf.length;i++) s+=buf[i]*buf[i]; return Math.sqrt(s/buf.length); }
+async function gStart(){
+  if(G.on) return true;
+  try{
+    G.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+  }catch(e){ showErr('Microphone is blocked. Tap the lock icon next to the address, allow Microphone, then reload.'); return false; }
+  G.ctx=new (window.AudioContext||window.webkitAudioContext)(); await G.ctx.resume(); G.rate=G.ctx.sampleRate;
+  G.src=G.ctx.createMediaStreamSource(G.stream);
+  G.node=G.ctx.createScriptProcessor(2048,1,1);
+  const mute=G.ctx.createGain(); mute.gain.value=0;
+  G.src.connect(G.node); G.node.connect(mute); mute.connect(G.ctx.destination);
+  G.node.onaudioprocess=e=>gFrame(new Float32Array(e.inputBuffer.getChannelData(0)));
+  G.on=true; $('levelWrap').hidden=false; setStatus('Listening… say it in English',true); return true;
+}
+function gStop(){
+  G.on=false; $('levelWrap').hidden=true;
+  try{ G.node&&(G.node.onaudioprocess=null); G.src&&G.src.disconnect(); G.node&&G.node.disconnect(); }catch(e){}
+  try{ G.stream&&G.stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  try{ G.ctx&&G.ctx.close(); }catch(e){}
+  G.ctx=G.stream=G.node=G.src=null; G.speaking=false; G.rec=[]; G.ring=[];
+}
+function gFrame(buf){
+  const frameSec=buf.length/G.rate, v=rms(buf);
+  $('level').style.width=Math.min(100,v*900)+'%';
+  if(G.sending||busy||!cur){ G.ring=[]; G.speaking=false; G.rec=[]; return; }
+  // slowly learn the background noise level
+  if(!G.speaking) G.noise = G.noise*0.97 + Math.min(v,0.05)*0.03;
+  const startT=Math.max(G.noise*3.2,0.012), stopT=Math.max(G.noise*2,0.008);
+  if(!G.speaking){
+    G.ring.push(buf); if(G.ring.length*frameSec>0.6) G.ring.shift();      // keep 0.6s before speech starts
+    G.loud = v>startT ? G.loud+frameSec : 0;
+    if(G.loud>=0.12){ G.speaking=true; G.rec=G.ring.slice(); G.ring=[]; G.quiet=0; setStatus('Hearing you…',true); }
+  } else {
+    G.rec.push(buf);
+    G.quiet = v<stopT ? G.quiet+frameSec : 0;
+    const len=G.rec.length*frameSec;
+    if(G.quiet>=0.95 || len>14){ const chunks=G.rec; G.rec=[]; G.speaking=false; G.loud=0;
+      if(len-G.quiet>0.35) gSend(chunks); else setStatus('Listening… say it in English',true); }
+  }
+}
+function toWav(chunks, inRate){
+  const outRate=16000, total=chunks.reduce((a,c)=>a+c.length,0), all=new Float32Array(total);
+  let o=0; for(const c of chunks){ all.set(c,o); o+=c.length; }
+  const ratio=inRate/outRate, n=Math.floor(total/ratio), pcm=new Int16Array(n);
+  for(let i=0;i<n;i++){ const a=Math.floor(i*ratio), b=Math.min(total,Math.floor((i+1)*ratio)); let s=0; for(let j=a;j<b;j++) s+=all[j]; const v=Math.max(-1,Math.min(1,s/Math.max(1,b-a))); pcm[i]=v<0?v*32768:v*32767; }
+  const buf=new ArrayBuffer(44+pcm.length*2), dv=new DataView(buf);
+  const w=(p,str)=>{ for(let i=0;i<str.length;i++) dv.setUint8(p+i,str.charCodeAt(i)); };
+  w(0,'RIFF'); dv.setUint32(4,36+pcm.length*2,true); w(8,'WAVE'); w(12,'fmt '); dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+  dv.setUint32(24,outRate,true); dv.setUint32(28,outRate*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true); w(36,'data'); dv.setUint32(40,pcm.length*2,true);
+  new Int16Array(buf,44).set(pcm);
+  const bytes=new Uint8Array(buf); let bin=''; for(let i=0;i<bytes.length;i+=0x8000) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+  return btoa(bin);
+}
+async function gSend(chunks){
+  if(!cur) return; const forN=cur.n; G.sending=true; setStatus('Checking…',true); setVerdict('');
+  try{
+    const r=await geminiListen(toWav(chunks,G.rate), cur.ur, cur.en);
+    if(!cur||cur.n!==forN) return;
+    const heard=(r.heard||'').trim(), w=spokenWords(heard);
+    if(!heard){ setVerdict('I could not hear clear words. Please say it again.','bad'); return; }
+    $('heard').innerHTML=markHeard(slots,w);
+    if(w.join(' ')==='skip'){ advance('skip'); return; }
+    if(matches(slots,w)){ setVerdict('✓ Exact!','good'); advance('ok'); return; }
+    if(cfg.gemOn && r.correct){ advance('ok',true); return; }
+    setVerdict('✗ Not quite. '+(r.tip||'Try again.'),'bad');
+  }catch(e){ setVerdict(e.message,'bad'); }
+  finally{ G.sending=false; if(G.on) setStatus('Listening… say it in English',true); }
+}
+
+// ---------- phone speech ----------
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 let rec=null, wantOn=false, wakeLock=null, baseIndex=0, lastFinal='', restartTimer=null;
 function setStatus(t,on){ $('status').textContent=t; $('heardBox').classList.toggle('listening',!!on); }
-function markNewSentence(){ baseIndex = rec && rec._len ? rec._len : 0; lastFinal=''; if(wantOn && !rec) startRec(); }
+function markNewSentence(){ baseIndex = rec && rec._len ? rec._len : 0; lastFinal=''; if(wantOn && !rec) startRec(); if(G.on) setStatus('Listening… say it in English',true); }
 
 function startRec(){
   if(!SR||!wantOn) return;
   if(rec){ rec.onend=null; rec.onresult=null; rec.onerror=null; try{rec.abort();}catch(e){} }
   const r=new SR(); rec=r; r._len=0; baseIndex=0;
-  r.lang=cfg.lang; r.interimResults=true; r.maxAlternatives=5; r.continuous=true;
+  r.lang=cfg.lang; r.interimResults=true; r.maxAlternatives=5; r.continuous=false;
   r.onstart=()=>setStatus('Listening… say it in English',true);
   r.onresult=e=>onResult(e);
   r.onerror=e=>{
@@ -344,13 +444,20 @@ function onResult(e){
   const last=e.results[e.results.length-1];
   if(last.isFinal){ const said=finals.slice(-1)[0]; if(said && said!==lastFinal){ lastFinal=said; checkWithGemini(said); } }
 }
-function startListening(){ if(!SR) return; wantOn=true; $('errNote').hidden=true; startRec(); keepAwake(); }
-function stopListening(){ wantOn=false; if(rec){ try{rec.abort();}catch(e){} } setStatus('Not listening',false); }
+function useGemini(){ return cfg.engine==='gemini' && !!cfg.gemKey; }
+async function startListening(){
+  $('errNote').hidden=true; keepAwake();
+  if(useGemini()){ wantOn=false; if(rec){ rec.onend=null; try{rec.abort();}catch(e){} rec=null; } await gStart(); return; }
+  gStop();
+  if(cfg.engine==='gemini' && !cfg.gemKey) showErr('Gemini needs your key. Open ☰ → Settings and paste it. Using phone listening for now.');
+  if(!SR) return; wantOn=true; startRec();
+}
+function stopListening(){ gStop(); wantOn=false; if(rec){ try{rec.abort();}catch(e){} } setStatus('Not listening',false); }
 function showErr(t){ $('errNote').textContent=t; $('errNote').hidden=false; }
 async function keepAwake(){ try{ if('wakeLock' in navigator && !wakeLock){ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>wakeLock=null);} }catch(e){} }
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){ if(rec){ rec.onend=null; try{rec.abort();}catch(e){} rec=null; } }
-  else if(wantOn){ startRec(); keepAwake(); }
+  if(document.hidden){ if(rec){ rec.onend=null; try{rec.abort();}catch(e){} rec=null; } if(G.on){ gStop(); G.resume=true; } }
+  else { if(G.resume){ G.resume=false; startListening(); } else if(wantOn){ startRec(); keepAwake(); } }
 });
 
 // ---------- buttons ----------
@@ -362,14 +469,14 @@ $('card').onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); t
 function fillMenu(){
   $('sDone').textContent=Object.keys(st.done).length; $('sSkip').textContent=Object.keys(st.skipped).length;
   $('sLeft').textContent=Math.max(0,st.queue.length-st.pos); $('sRounds').textContent=st.round;
-  $('langSel').value=cfg.lang; $('gemOn').checked=cfg.gemOn; $('gemKey').value=cfg.gemKey; $('gemModel').value=cfg.gemModel; $('gemTestOut').textContent='';
+  $('engSel').value=cfg.engine; $('langSel').value=cfg.lang; $('gemOn').checked=cfg.gemOn; $('gemKey').value=cfg.gemKey; $('gemModel').value=cfg.gemModel; $('gemTestOut').textContent='';
 }
 function readMenu(){
-  const oldLang=cfg.lang;
-  cfg.lang=$('langSel').value; cfg.gemOn=$('gemOn').checked; cfg.gemKey=$('gemKey').value.trim(); cfg.gemModel=$('gemModel').value.trim()||'gemini-flash-latest';
-  lset(SKEY,cfg); return oldLang!==cfg.lang;
+  const old=cfg.lang+cfg.engine+cfg.gemKey;
+  cfg.engine=$('engSel').value; cfg.lang=$('langSel').value; cfg.gemOn=$('gemOn').checked; cfg.gemKey=$('gemKey').value.trim(); cfg.gemModel=$('gemModel').value.trim()||'gemini-flash-latest';
+  lset(SKEY,cfg); return old!==cfg.lang+cfg.engine+cfg.gemKey;
 }
-function closeMenuAnd(fn){ const langChanged=readMenu(); $('menuScreen').hidden=true; if(fn) fn(); if(!cur) show(); if(!wantOn) startListening(); else if(langChanged) startRec(); }
+function closeMenuAnd(fn){ const langChanged=readMenu(); $('menuScreen').hidden=true; if(fn) fn(); if(!cur) show(); if(langChanged || (!wantOn && !G.on)) startListening(); }
 $('menuBtn').onclick=()=>{ fillMenu(); $('menuScreen').hidden=false; };
 $('closeMenu').onclick=()=>closeMenuAnd();
 $('restartBtn').onclick=()=>closeMenuAnd(()=>{ st.queue=SENTENCES.map(s=>s.n); st.pos=0; st.skipped={}; st.round++; save(); $('tapHint').hidden=false; show(); });
@@ -385,7 +492,7 @@ $('gemTest').onclick=async()=>{
 };
 
 // ---------- first screen ----------
-if(!SR){ $('supportNote').hidden=false; $('supportNote').textContent='This browser cannot hear speech. Please open this page in Google Chrome.'; }
+if(!SR && !(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){ $('supportNote').hidden=false; $('supportNote').textContent='This browser cannot hear speech. Please open this page in Google Chrome.'; }
 if(st.pos>0 && st.pos<st.queue.length) $('resumeInfo').textContent=`You stopped at ${st.pos+1} of ${st.queue.length}. Tap start to continue.`;
 </script>
 </body>
