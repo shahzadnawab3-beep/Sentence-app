@@ -72,6 +72,19 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
 .stat b{display:block;font-size:1.5rem;font-variant-numeric:tabular-nums}
 .stat span{font-size:.8rem;color:var(--muted)}
+
+.words{background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-size:1.05rem;font-weight:600;color:var(--ink);text-align:center;margin:0}
+.words small{display:block;font-weight:500;font-size:.75rem;color:var(--muted);margin-bottom:2px;text-transform:uppercase;letter-spacing:.08em}
+.verdict{font-size:.9rem;margin:6px 0 0;color:var(--muted)}
+.verdict.good{color:var(--accent);font-weight:600}
+.verdict.bad{color:var(--warn)}
+.tap-hint{text-align:center;font-size:.75rem;color:var(--muted);margin:0}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:.85rem;color:var(--muted)}
+.field input,.field select{font:500 1rem var(--ui);padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);min-width:0}
+.check{display:flex;align-items:center;gap:10px;font-size:.95rem}
+.check input{width:22px;height:22px}
+.screen.scroll{justify-content:flex-start;overflow-y:auto}
 @media (prefers-reduced-motion: reduce){.card{transition:none}}
 </style>
 </head>
@@ -81,28 +94,45 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
   <h1>Bol Ke Seekho</h1>
   <p class="urt">اردو پڑھیں، انگریزی میں بولیں</p>
   <ul>
-    <li>Read the Urdu sentence.</li>
-    <li>Say it in English. The exact words move you ahead.</li>
-    <li>Say <b>"skip"</b> to skip, or <b>"answer"</b> to see the English.</li>
+    <li>Read the Urdu sentence and say it in English.</li>
+    <li>Exact words move you ahead. With Gemini on, your own words are accepted if the meaning is right.</li>
+    <li>Tap the Urdu card to see the real English words.</li>
+    <li>Say <b>"skip"</b> to skip.</li>
   </ul>
   <p id="resumeInfo"></p>
   <button class="primary" id="startBtn">Start speaking</button>
   <p class="note" id="supportNote" hidden></p>
 </div>
 
-<div class="screen" id="menuScreen" hidden>
-  <h1>Progress</h1>
+<div class="screen scroll" id="menuScreen" hidden>
+  <h1>Menu</h1>
   <div class="stats">
     <div class="stat"><b id="sDone">0</b><span>Said right</span></div>
     <div class="stat"><b id="sSkip">0</b><span>Skipped</span></div>
     <div class="stat"><b id="sLeft">0</b><span>Left</span></div>
     <div class="stat"><b id="sRounds">1</b><span>Round</span></div>
   </div>
-  <label for="jumpTo"><p>Go to sentence number</p></label>
-  <div class="row"><input id="jumpTo" type="number" inputmode="numeric" min="1" placeholder="1 – 473"><button id="jumpBtn">Go</button></div>
+  <div class="field"><label for="jumpTo">Go to sentence number</label>
+    <div class="row"><input id="jumpTo" type="number" inputmode="numeric" min="1" placeholder="1 – 473"><button id="jumpBtn">Go</button></div></div>
   <button id="skippedBtn">Practice skipped only</button>
   <button id="restartBtn">Start again from 1</button>
-  <button class="primary" id="closeMenu">Back</button>
+
+  <h1 style="font-size:1.3rem;margin-top:8px">Settings</h1>
+  <div class="field"><label for="langSel">Listening accent</label>
+    <select id="langSel">
+      <option value="en-IN">English (India / Pakistan accent) – recommended</option>
+      <option value="en-PK">English (Pakistan)</option>
+      <option value="en-US">English (US)</option>
+      <option value="en-GB">English (UK)</option>
+    </select></div>
+  <label class="check"><input type="checkbox" id="gemOn"> Use Gemini to accept my own words</label>
+  <div class="field"><label for="gemKey">Gemini API key (saved only on this phone)</label>
+    <input id="gemKey" type="password" autocomplete="off" placeholder="Paste your key here"></div>
+  <div class="field"><label for="gemModel">Gemini model</label>
+    <input id="gemModel" type="text" autocomplete="off"></div>
+  <button id="gemTest">Test Gemini</button>
+  <p class="verdict" id="gemTestOut"></p>
+  <button class="primary" id="closeMenu">Save and go back</button>
 </div>
 
 <div class="top">
@@ -113,31 +143,36 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <div class="bar"><i id="barFill"></i></div>
 
 <main>
-  <section class="card" id="card">
+  <section class="card" id="card" role="button" tabindex="0" aria-label="Tap to show the English words">
     <span class="num" id="num"></span>
     <p class="ur" id="ur" lang="ur"></p>
-    <p class="answer" id="answer"></p>
+    <p class="tap-hint" id="tapHint">Tap to see the English words</p>
   </section>
+  <p class="words" id="words" hidden><small>English</small><span id="wordsText"></span></p>
   <section class="heard" id="heardBox">
     <div class="lbl"><span class="dot"></span><span id="status">Not listening</span></div>
     <p id="heard"></p>
+    <p class="verdict" id="verdict"></p>
   </section>
   <p class="note" id="errNote" hidden></p>
 </main>
 
 <div class="ctrl">
-  <button id="answerBtn">Show answer</button>
+  <button id="answerBtn">Show words</button>
   <button id="skipBtn">Skip</button>
 </div>
 
 <script>
 const SENTENCES = [{"n":1,"en":"I got you","ur":"میں سمجھ گیا"},{"n":2,"en":"I gave you","ur":"میں نے تمہیں دیا"},{"n":3,"en":"I owe you.","ur":"میں تمہارا مقروض ہوں"},{"n":4,"en":"We set off.","ur":"ہم روانہ ہو گئے۔"},{"n":5,"en":"Don't worry","ur":"بے فکر ہو جاؤ"},{"n":6,"en":"You owe me.","ur":"تم میرے مقروض ہو"},{"n":7,"en":"I teamed up.","ur":"میں نے مل کر کام کیا۔"},{"n":8,"en":"We departed.","ur":"ہم روانہ ہو گئے۔"},{"n":9,"en":"It dried up.","ur":"سوکھ گیا۔"},{"n":10,"en":"Put it down.","ur":"رکھ دو وہاں"},{"n":11,"en":"Be carefree.","ur":"بے فکر ہو جاؤ"},{"n":12,"en":"I carried on","ur":"میں نے جاری رکھا"},{"n":13,"en":"I needed it.","ur":"مجھے ضرورت پڑی"},{"n":14,"en":"Put to shame","ur":"شرمندہ کرنا"},{"n":15,"en":"Freaking out","ur":"بہت گھبرا جانا"},{"n":16,"en":"If we delay.","ur":"اگر ہم نے دیر کی"},{"n":17,"en":"Some sort of","ur":"کسی طرح کا / ایک قسم کا"},{"n":18,"en":"Along the way","ur":"راستے میں"},{"n":19,"en":"I was ghosted","ur":"مجھے نظر انداز کیا گیا"},{"n":20,"en":"Light is back","ur":"بجلی واپس آ گئی ہے"},{"n":21,"en":"Sit lean back","ur":"ٹیک لگا کر بیٹھو"},{"n":22,"en":"I am told that","ur":"مجھے کہا جاتا ہے کہ"},{"n":23,"en":"Stick with it.","ur":"اسے جاری رکھو۔"},{"n":24,"en":"I lend to her.","ur":"میں نے اُسے اُدھار دیا"},{"n":25,"en":"Keep it there.","ur":"رکھ دو وہاں"},{"n":26,"en":"I told you so.","ur":"میں نے تم سے کہا تھا"},{"n":27,"en":"Do I know you?","ur":"کیا میں تمہیں جانتا ہوں؟"},{"n":28,"en":"Cross my heart","ur":"میں سچ کہہ رہا ہوں"},{"n":29,"en":"We drove there","ur":"ہم وہاں گاڑی چلا کر گئے"},{"n":30,"en":"Welcome aboard","ur":"خوش آمدید (شمولیت پر)"},{"n":31,"en":"To one another","ur":"ایک دوسرے کو"},{"n":32,"en":"Keep your cool","ur":"اپنا غصہ قابو میں رکھو"},{"n":33,"en":"I have been to.","ur":"میں جا چکا ہوں۔"},{"n":34,"en":"I am all alone.","ur":"میں بالکل اکیلا ہوں۔"},{"n":35,"en":"I nurtured him.","ur":"میں نے اُس کی پرورش کی"},{"n":36,"en":"When urge hits.","ur":"جب خواہش ہوتی ہے"},{"n":37,"en":"You're all set.","ur":"آپ کا کام مکمل ہو چکا ہے۔"},{"n":38,"en":"I directed him.","ur":"میں نے اسے ہدایت دی۔"},{"n":39,"en":"Something lacks","ur":"کچھ کمی ہے"},{"n":40,"en":"Done and dusted","ur":"مکمل طور پر ختم"},{"n":41,"en":"Get off the bus","ur":"بس سے اترنا"},{"n":42,"en":"Word of caution","ur":"احتیاطی مشورہ"},{"n":43,"en":"she cursed her.","ur":"اس نے اس کو بد دعا دی"},{"n":44,"en":"Take the plunge","ur":"ہمت کر کے قدم اٹھانا"},{"n":45,"en":"Tore his shirt.","ur":"اس کی قمیض پھاڑ دی"},{"n":46,"en":"A day to wander.","ur":"گھومنے کا دن"},{"n":47,"en":"It is about him.","ur":"اس کا ذکر ہے۔"},{"n":48,"en":"Don't you think?","ur":"کیا آپ کو نہیں لگتا؟"},{"n":49,"en":"Ali set it free.","ur":"علی نے اِسے آزاد کر دیا۔"},{"n":50,"en":"You are so mean.","ur":"تم بہت ظالم ہو۔"},{"n":51,"en":"Do I need to go?","ur":"کیا مجھے جانا ہے؟"},{"n":52,"en":"Who deeply hated","ur":"جو شدت سے نفرت کرتا تھا"},{"n":53,"en":"Saudis oil curse","ur":"سعودی عرب کی تیل کی لعنت"},{"n":54,"en":"State of the art","ur":"جدید ترین"},{"n":55,"en":"Having said that","ur":"اس کے باوجود"},{"n":56,"en":"Don't you get it","ur":"کیا تمہیں سمجھ نہیں آتی؟"},{"n":57,"en":"So-and-so person","ur":"فلاں شخص"},{"n":58,"en":"Since late 2025.","ur":"2025 کے آخر سے"},{"n":59,"en":"I plead with you.","ur":"میں آپ سے منت کرتا ہوں۔"},{"n":60,"en":"Feeding children.","ur":"بچوں کا پیٹ پالنا۔"},{"n":61,"en":"That sounds like.","ur":"وہ ایسا لگتا ہے۔"},{"n":62,"en":"I have breakfast.","ur":"میں ناشتہ کرتا ہوں"},{"n":63,"en":"I meant to do it.","ur":"میرا ارادہ تھا کہ یہ کروں۔"},{"n":64,"en":"Even so, I agree.","ur":"پھر بھی میں راضی ہوں"},{"n":65,"en":"Despite all this.","ur":"ان سب کے باوجود"},{"n":66,"en":"Land the contract","ur":"معاہدہ حاصل کرنا"},{"n":67,"en":"I have had coffee.","ur":"میں نے کافی پی لی ہے۔"},{"n":68,"en":"Always keep it up.","ur":"ہمیشہ قائم رکھو۔"},{"n":69,"en":"Stripping them of.","ur":"ان سے چھیننا"},{"n":70,"en":"On a lighter note.","ur":"ہلکے پھلکے انداز میں"},{"n":71,"en":"On a related note.","ur":"اسی ضمن میں"},{"n":72,"en":"I have eaten food.","ur":"میں نے کھانا کھا لیا ہے۔"},{"n":73,"en":"It rained heavily.","ur":"بہت بارش ہوئی"},{"n":74,"en":"The point is this.","ur":"بات کا مقصد یہ ہے۔"},{"n":75,"en":"It's been 6 months","ur":"چھ مہینے ہو چکے ہیں"},{"n":76,"en":"You are framing me","ur":"تم مجھے پھنسا رہے ہو"},{"n":77,"en":"A death row inmate","ur":"سزائے موت کا قیدی"},{"n":78,"en":"It's been 30 days.","ur":"30 دن ہو چکے ہیں"},{"n":79,"en":"As Pakistan clinch","ur":"جیسے ہی پاکستان جیت لے"},{"n":80,"en":"Wind is picking up","ur":"ہوا تیز ہو رہی ہے"},{"n":81,"en":"In the thick of it","ur":"کسی کام یا مشکل صورتحال کے عین درمیان / گھما گھمی میں"},{"n":82,"en":"I am done with you","ur":"میں تم سے تنگ آ چکا ہوں۔"},{"n":83,"en":"A man with a spine","ur":"باہمت آدمی"},{"n":84,"en":"Full Circle moment","ur":"وہ لمحہ جب چیزیں اپنی ابتدا کی طرف لوٹ آئیں"},{"n":85,"en":"This often happens.","ur":"اکثر ایسا ہوتا ہے۔"},{"n":86,"en":"This wasn't needed.","ur":"اس کی ضرورت نہیں تھی"},{"n":87,"en":"They tend to check.","ur":"وہ چیک کرتے ہیں"},{"n":88,"en":"I will lend to him.","ur":"میں اُسے اُدھار دوں گا"},{"n":89,"en":"He moved past them.","ur":"وہ ان کے پاس سے گزر گیا۔"},{"n":90,"en":"Whatever it may be.","ur":"چاہے جو بھی ہو"},{"n":91,"en":"On top of all this.","ur":"ان سب کے علاوہ"},{"n":92,"en":"Ahead of the curve.","ur":"اپنے وقت سے آگے"},{"n":93,"en":"This cannot happen.","ur":"ایسا نہیں ہو سکتا۔"},{"n":94,"en":"I got electrocuted.","ur":"مجھے کرنٹ لگ گیا۔"},{"n":95,"en":"center of attention","ur":"توجہ کا مرکز"},{"n":96,"en":"Some father you are","ur":"تم کیسے باپ ہو (طنزیہ)"},{"n":97,"en":"And we are even now","ur":"اور ہمارا حساب برابر ہے"},{"n":98,"en":"Here's a sneak peek","ur":"یہ ہے ایک جھلک"},{"n":99,"en":"she was ungrateful.","ur":"اس نے احسان فراموشی کی"},{"n":100,"en":"My mom walked me up","ur":"میری امی نے مجھے جگایا"},{"n":101,"en":"Don't shake me down","ur":"مجھ سے زبردستی پیسے مت اینٹھو۔"},{"n":102,"en":"Never climb a tree.","ur":"کبھی درخت پر نہ چڑھو"},{"n":103,"en":"The power went off.","ur":"بجلی چلی گئی ہے۔"},{"n":104,"en":"Hands on Experience","ur":"عملی تجربہ"},{"n":105,"en":"Such-and-such thing","ur":"فلاں چیز"},{"n":106,"en":"I have ever been to.","ur":"میں کبھی گیا ہوں۔"},{"n":107,"en":"China is benefiting.","ur":"چین کا بھلا ہو رہا ہے۔"},{"n":108,"en":"Has been pulled out.","ur":"نکال لیا گیا ہے"},{"n":109,"en":"Head towards Jinnah.","ur":"جناح کی طرف روانہ ہو جاؤ"},{"n":110,"en":"I borrowed from him.","ur":"میں نے اُس سے اُدھار لیا"},{"n":111,"en":"For which we waited.","ur":"جس کے لیے ہم نے انتظار کیا"},{"n":112,"en":"Don't rush to speak.","ur":"بولنے میں جلدی مت کرو۔"},{"n":113,"en":"Let go of the stick.","ur":"چھڑی چھوڑ دو۔"},{"n":114,"en":"We can now see hope.","ur":"ابھی ہمیں امید نظر آیا ہے"},{"n":115,"en":"I could not stand it","ur":"میں یہ برداشت نہیں کر سکا"},{"n":116,"en":"We have had a record","ur":"ہمارا ایک ریکارڈ رہا ہے"},{"n":117,"en":"Wasn't able to do so","ur":"ایسا نہیں کر سکا۔"},{"n":118,"en":"He can play his move","ur":"وہ اپنی چال چل سکتا ہے"},{"n":119,"en":"I have a sore throat.","ur":"میرا گلا خراب ہے۔"},{"n":120,"en":"It keeps fluctuating.","ur":"اس میں اُتار چڑھاؤ آتا رہتا ہے۔"},{"n":121,"en":"Rushed there at once.","ur":"ایک دم وہاں پہنچ گئے"},{"n":122,"en":"Driven by one sector.","ur":"ایک شعبے سے چلنے و لا"},{"n":123,"en":"You just reach there.","ur":"تم وہاں پہنچ جاؤ"},{"n":124,"en":"We offered the prayer","ur":"ہم نے نماز پڑھی۔"},{"n":125,"en":"The same thing again.","ur":"پھر وہی بات"},{"n":126,"en":"Someone or the other.","ur":"کوئی نہ کوئی"},{"n":127,"en":"And got back to sleep","ur":"اور دوبارہ سو گیا"},{"n":128,"en":"I am working non stop","ur":"میں مسلسل کام کر رہا ہوں"},{"n":129,"en":"I feel like urinating.","ur":"مجھے پیشاب آیا ہے"},{"n":130,"en":"Which I was afraid of.","ur":"جس سے میں ڈر رہا تھا"},{"n":131,"en":"If you really need to.","ur":"اگر تمہیں واقعی ضرورت ہو"},{"n":132,"en":"I am not feeling well.","ur":"میری طبیعت ٹھیک نہیں ہے۔"},{"n":133,"en":"How may I address you?","ur":"میں آپ کو کس نام سے پکاروں؟ / آپ کو کیسے مخاطب کروں؟"},{"n":134,"en":"The word has come true","ur":"بات سچ ثابت ہو گئی ہے"},{"n":135,"en":"It/he will mislead us.","ur":"ہمیں غلط لے جائے گا"},{"n":136,"en":"Taking him for granted","ur":"اسے ہلکا سمجھنا"},{"n":137,"en":"I turned off the alarm","ur":"میں نے الارم بند کیا"},{"n":138,"en":"Walking along the road","ur":"سڑک کے ساتھ ساتھ چلتے ہوئے"},{"n":139,"en":"I am pleased with you.","ur":"میں آپ سے راضی ہوں"},{"n":140,"en":"Ahil finished his food.","ur":"آہل نے اپنا کھانا ختم کر دیا۔"},{"n":141,"en":"Is the colonel at home?","ur":"کیا کرنل گھر پر ہیں؟"},{"n":142,"en":"Does this often happen?","ur":"کیا اکثر ایسا ہوتا ہے؟"},{"n":143,"en":"The train whistle blew.","ur":"ریل کی سیٹی بجی۔"},{"n":144,"en":"Shahzad tired them out.","ur":"شہزاد نے ان کو تھکا دیا"},{"n":145,"en":"Everything falls apart.","ur":"سب کچھ بکھر جاتا ہے۔"},{"n":146,"en":"So that it becomes hot.","ur":"تاکہ یہ گرم ہو جائیں"},{"n":147,"en":"I will borrow from her.","ur":"میں اُس سے اُدھار لوں گا"},{"n":148,"en":"The pursuit of success.","ur":"کامیابی کا حصول"},{"n":149,"en":"A smile goes a long way","ur":"ایک مسکراہٹ بہت دور تک اثر کرتی ہے"},{"n":150,"en":"I can stay by your side","ur":"میں آپ کے ساتھ رہ سکتا ہوں۔"},{"n":151,"en":"What advice will I give?","ur":"میں کیا نصیحت کروں گا؟"},{"n":152,"en":"But this thing is clear.","ur":"لیکن یہ بات تو واضح ہے۔"},{"n":153,"en":"And does light exercise.","ur":"اور ہلکی سی ورزش کرتا ہے۔"},{"n":154,"en":"Uprooted and threw away.","ur":"اکھاڑ پھینکا۔"},{"n":155,"en":"As far as I'm concerned.","ur":"جہاں تک میرا تعلق ہے۔"},{"n":156,"en":"But you still get there.","ur":"لیکن تم پھر بھی وہاں پہنچ جاتی ہو۔"},{"n":157,"en":"But experts pushed back.","ur":"لیکن ماہرین نے مخالفت کی"},{"n":158,"en":"May land you in trouble.","ur":"تمہیں مصیبت میں ڈال سکتا ہے۔"},{"n":159,"en":"They may grill you more.","ur":"وہ تم سے زیادہ پوچھ گچھ کر سکتے ہیں۔"},{"n":160,"en":"I kept it as a reminder.","ur":"میں نے اسے یاد دہانی کے لیے رکھا تھا"},{"n":161,"en":"We should cool off a bit","ur":"ہمیں تھوڑا ٹھنڈا ہو جانا چاہیے۔"},{"n":162,"en":"Walking through the park","ur":"پارک کے درمیان سے چلتے ہوئے"},{"n":163,"en":"in this regard, China...","ur":"اس حوالے سے چین نے..."},{"n":164,"en":"We've just had breakfas.","ur":"ہم ابھی نے ناشتہ کر لیا"},{"n":165,"en":"Remember that day, right?","ur":"یاد ہے نا اُس دن؟"},{"n":166,"en":"His eye is getting worse.","ur":"اس کی آنکھ مزید خراب ہو رہی ہے۔"},{"n":167,"en":"In which I endured a few.","ur":"جس میں کچھ میں نے برداشت کیے۔"},{"n":168,"en":"It absolutely skyrockets.","ur":"یہ بالکل آسمان کو چھو لیتا ہے۔"},{"n":169,"en":"What triggered the blaze?","ur":"آگ کیوں بھڑکی؟"},{"n":170,"en":"Where you must stand out.","ur":"جہاں آپ کو نمایاں ہونا ضروری ہے"},{"n":171,"en":"Argentina take on england","ur":"ارجنٹائن انگلینڈ کا مقابلہ کرے گا"},{"n":172,"en":"But it doesn't have to be","ur":"لیکن ایسا ہونا ضروری نہیں"},{"n":173,"en":"So maybe I would tell him","ur":"تو شاید میں اسے بتا دیتا"},{"n":174,"en":"My leg was stretched out.","ur":"میرا پاؤں بچھا ہوا تھا"},{"n":175,"en":"No one seems to know this","ur":"کسی کو بھی یہ معلوم نہیں لگتا"},{"n":176,"en":"Tension is sore with Iran.","ur":"ایران کے ساتھ کشیدگی بڑھ گئی ہے۔"},{"n":177,"en":"What can anyone do to you?","ur":"کوئی آپ کا کیا کر سکتا ہے؟"},{"n":178,"en":"Horia burst into laughter.","ur":"حوریہ کھلکھلا کر ہنس پڑی۔"},{"n":179,"en":"Then I will also help you.","ur":"تو پھر میں تمہاری بھی مدد کروں گا۔"},{"n":180,"en":"One day you had helped me.","ur":"ایک دن آپ نے میری مدد کی تھی۔"},{"n":181,"en":"Which one is it closer to?","ur":"کس کا یہ زیادہ قریب ہے؟"},{"n":182,"en":"My father runs a business.","ur":"میرے والد کاروبار کرتے ہیں"},{"n":183,"en":"There is no outrunning it.","ur":"اس سے بچنا ممکن نہیں"},{"n":184,"en":"Somehow get our work done.","ur":"کسی طریقے سے ہمارا کام نکال لے"},{"n":185,"en":"It would be your kindness.","ur":"آپ کی مہربانی ہوگی"},{"n":186,"en":"I was still sitting there.","ur":"میں وہاں ابھی تک بیٹھا ہوا تھا"},{"n":187,"en":"Then made a little effort.","ur":"پھر تھوڑی کوشش کی"},{"n":188,"en":"I have an itch in my head.","ur":"مجھے سر میں خارش ہو رہی ہے"},{"n":189,"en":"What's the most he can do?","ur":"زیادہ سے زیادہ کیا کر سکتا ہے؟"},{"n":190,"en":"I'll sit until he arrives.","ur":"جب تک یہ آ نہیں جاتا، میں بیٹھا رہوں گا"},{"n":191,"en":"Don't make boastful claims.","ur":"بڑی بڑی باتیں مت کرو۔"},{"n":192,"en":"It's hard to pay attention.","ur":"توجہ دینا مشکل ہوتا ہے۔"},{"n":193,"en":"Why did you get here today?","ur":"آج آپ یہاں کیوں آئے؟"},{"n":194,"en":"I note down some sentences.","ur":"میں نے کچھ جملے نوٹ کر لیے ہیں۔"},{"n":195,"en":"I am not going to tell you.","ur":"میں آپ کو بتانے و لا نہیں ہوں۔"},{"n":196,"en":"How could I not have known.","ur":"کیسے مجھے پتہ نہ چلتا۔"},{"n":197,"en":"The water spoiled her food.","ur":"پانی نے اُس کا کھانا خراب کر دیا۔"},{"n":198,"en":"Was struck by the evil eye.","ur":"نظر لگ گئی تھی"},{"n":199,"en":"And how you can break free.","ur":"اور تم آزاد کیسے ہو سکتے ہو؟"},{"n":200,"en":"Does your body crash later?","ur":"کیا آپ کا جسم بعد میں ٹوٹ جاتا ہے؟"},{"n":201,"en":"It's been sitting for days.","ur":"یہ دنوں سے پڑا ہوا ہے۔"},{"n":202,"en":"Why don't you listen to me?","ur":"تم میرا کہنا کیوں نہیں مانتے؟"},{"n":203,"en":"He had eaten all the honey.","ur":"سارا شہد وہ کھا گیا تھا"},{"n":204,"en":"Underestimated our resolve.","ur":"ہمارے عزم کو کم سمجھا"},{"n":205,"en":"I have known something new.","ur":"میں نے کچھ نیا جان لیا ہے۔"},{"n":206,"en":"Is Shahzad perhaps Shahbaz?","ur":"شہزاد کہیں شہباز تو نہیں"},{"n":207,"en":"Which we might have needed.","ur":"جس کی ہمیں شاید ضرورت ہوتی"},{"n":208,"en":"Where I got a checkup done.","ur":"جہاں پر میں نے چیک اپ کروایا"},{"n":209,"en":"You weren't filling petrol.","ur":"تم پیٹرول نہیں بھر رہے تھے"},{"n":210,"en":"Families of fallen soldiers","ur":"شہداء کے خاندان"},{"n":211,"en":"We'll pick this up tomorrow","ur":"ہم اسے کل جاری رکھیں گے"},{"n":212,"en":"Shahzad blew up that office.","ur":"شہزاد نے اس دفتر کو اُڑا دیا۔"},{"n":213,"en":"He had a wet dream at night.","ur":"رات کو اس کا احتلام ہو گیا۔"},{"n":214,"en":"How do you cope with it all?","ur":"آپ اس سب کا مقابلہ کیسے کرتے ہیں؟"},{"n":215,"en":"Horia messed up Saim's hair.","ur":"حوریہ نے سائم کے بال بگاڑ دیے۔"},{"n":216,"en":"Do you have someone in mind?","ur":"آپ کی نظر میں کوئی ہے؟"},{"n":217,"en":"We will make you listen too.","ur":"ہم آپ کو بھی سنوائیں گے۔"},{"n":218,"en":"Ruki restored her breathing.","ur":"رُکی نے سانس بحال کی۔"},{"n":219,"en":"Today you respected my wish.","ur":"آج آپ نے میرا مان رکھ لیا۔"},{"n":220,"en":"May Allah deliver it safely.","ur":"ہللا ... سلامت پہنچائے"},{"n":221,"en":"Reflecting on these factors.","ur":"ان عوامل پر غور کرتے ہوئے"},{"n":222,"en":"I'm drying off with a towel.","ur":"میں تولیے سے اپنے آپ کو خشک کر رہا ہوں"},{"n":223,"en":"We will dispose of the body.","ur":"ہم لاش کو ٹھکانے لگا دیں گے۔"},{"n":224,"en":"Right at 8 o'clock, we left.","ur":"ٹھیک 8 بجے ہم نکل گئے۔"},{"n":225,"en":"If he fires me from the job.","ur":"اگر مجھے نوکری سے نکال دے"},{"n":226,"en":"Because I had already known.","ur":"کیونکہ میں جان چکا تھا"},{"n":227,"en":"Maybe trouble has upside too","ur":"شاید مصیبت کا کوئی فائدہ بھی ہوتا ہے"},{"n":228,"en":"I should have arrived early.","ur":"مجھے جلدی پہنچ جانا چاہیے تھا"},{"n":229,"en":"I didn't feel like replying.","ur":"میرا دل جواب دینے کو نہیں چاہ رہا تھا"},{"n":230,"en":"Both fellow players and fans.","ur":"ساتھی کھلاڑی اور پرستار دونوں"},{"n":231,"en":"Moved it towards the captain.","ur":"کیپٹن کی طرف بڑھا دیا۔"},{"n":232,"en":"I was getting worried anyway.","ur":"ویسے بھی میں پریشان ہو رہا تھا۔"},{"n":233,"en":"I don't see why that matters.","ur":"مجھے سمجھ نہیں آتی کہ اس سے کیا فرق پڑتا ہے۔"},{"n":234,"en":"My sleep was quite prolonged.","ur":"میری نیند کافی طویل تھی۔"},{"n":235,"en":"I'm not really into shopping.","ur":"مجھے شاپنگ کا خاص شوق نہیں ہے۔"},{"n":236,"en":"This will incur some expense.","ur":"اس پر کچھ خرچہ آئے گا"},{"n":237,"en":"I am working around the clock","ur":"میں دن رات کام کر رہا ہوں"},{"n":238,"en":"Then listen to their screams.","ur":"تم ان کی چیخیں سنو، پھر"},{"n":239,"en":"I want to make them hear this.","ur":"میں ان کو یہ سنانا چاہتا ہوں۔"},{"n":240,"en":"And the wind was blowing fast.","ur":"اور ہوا تیزی سے چل رہی تھی۔"},{"n":241,"en":"Lying in Ahil's room at night.","ur":"رات کو آہل کے کمرے میں لیٹے ہوئے"},{"n":242,"en":"Don't cast a wrong eye on her.","ur":"تم اُس پر غلط نظر نہ ڈالو۔"},{"n":243,"en":"It was very hot in the forest.","ur":"جنگل میں بہت گرمی تھی"},{"n":244,"en":"If only we could say all that.","ur":"کاش ہم وہ سب کہہ پاتے۔"},{"n":245,"en":"That sounds like a clear plan.","ur":"یہ ایک واضح منصوبہ لگتا ہے۔"},{"n":246,"en":"If you have roamed in Karachi.","ur":"اگر آپ کراچی میں گھومے ہیں"},{"n":247,"en":"Who don't need flashy effects.","ur":"جنہیں دکھاوے کی ضرورت نہیں"},{"n":248,"en":"Whenever you get this feeling.","ur":"جب بھی تمہیں یہ احساس ہو"},{"n":249,"en":"Things are finally looking up.","ur":"چیزیں آخر کار بہتر ہو رہی ہیں۔"},{"n":250,"en":"On the condition of anonymity.","ur":"گمنام رہنے کی شرط پر"},{"n":251,"en":"I also looked a place to pray.","ur":"میں نے نماز پڑھنے کے لیے جگہ بھی ڈھونڈی۔"},{"n":252,"en":"Even if we had that much money","ur":"اگر ہمارے پاس اتنی رقم ہوتی بھی"},{"n":253,"en":"You have to go straight ahead.","ur":"تمہیں سیدھا سیدھا جانا ہے"},{"n":254,"en":"her point was left unfinished.","ur":"اس کی بات درمیان میں رہ گئی"},{"n":255,"en":"Why are you so grief-stricken?","ur":"اتنے غمزدہ کیوں ہو"},{"n":256,"en":"How dare you challenge my son.","ur":"تم نے میرے بیٹے کو چیلنج کرنے کی ہمت کی کیسے"},{"n":257,"en":"I will do as much as possible.","ur":"جتنا زیادہ ہو سکے میں کروں گا"},{"n":258,"en":"He used to keep me dressed up.","ur":"وہ مجھے سجا سنوار کر رکھتا تھا"},{"n":259,"en":"Built out of a complex terrain","ur":"پیچیدہ زمینی ساخت پر تعمیر شدہ"},{"n":260,"en":"It's somewhat similar to that.","ur":"تھوڑا بہت اس سے ملتا ہے"},{"n":261,"en":"You have already lost the room","ur":"آپ پہلے ہی ماحول/حمایت کھو چکے ہیں"},{"n":262,"en":"This problem came up the most.","ur":"سب سے زیادہ یہ مسئلہ پیش آیا"},{"n":263,"en":"So that we can gossip with him","ur":"تاکہ ہم اس کے ساتھ گپ شپ کر سکیں"},{"n":264,"en":"These files have to be exposed.","ur":"ان فائلوں کو ظاہرہونا ہوگا"},{"n":265,"en":"Pakistan has been lucky so far.","ur":"پاکستان اب تک خوش قسمت رہا ہے۔"},{"n":266,"en":"Beware! Don't try any mischief.","ur":"!خبردار کوئی شرارت نہ کرنا۔"},{"n":267,"en":"Uprooted the tree and threw it.","ur":"درخت کو اکھاڑ پھینکا۔"},{"n":268,"en":"Your old age and so much lying.","ur":"تمہارا یہ بڑھاپا اور اِتنا جھوٹ۔"},{"n":269,"en":"No son, I have already had tea.","ur":"نہیں بیٹا، میں چائے پی چکا ہوں۔"},{"n":270,"en":"He had reached home by evening.","ur":"شام تک وہ گھر پہنچ گیا تھا۔"},{"n":271,"en":"What draws you to that country?","ur":"آپ کو اُس ملک کی طرف کیا کھینچتا ہے؟"},{"n":272,"en":"she pleaded with folded hands..","ur":"ہاتھ جوڑ کر منت کی۔"},{"n":273,"en":"My digestion doesn't work well.","ur":"میرا ہاضمہ ٹھیک کام نہیں کرتا"},{"n":274,"en":"If only he shows a little mercy","ur":"اگر وہ ہی تھوڑا رحم کرے"},{"n":275,"en":"And want to be upfront with you","ur":"اور آپ کے ساتھ کھل کر بات کرنا چاہتا ہوں"},{"n":276,"en":"Take out only as much as needed.","ur":"جتنا ضرورت ہو اُتنا نکالے۔"},{"n":277,"en":"I am not used to excessive heat.","ur":"میں زیادہ گرمی کا عادی نہیں ہوں"},{"n":278,"en":"May Allah make you reach safely.","ur":"ہللا تمہیں سلامت پہنچائے"},{"n":279,"en":"Do you see anyone just run past?","ur":"کیا تم نے کسی کو صرف گزرتے ہوئے دیکھا؟"},{"n":280,"en":"What are you up to this Saturday","ur":"آپ ہفتہ کو کیا کر رہے ہیں؟"},{"n":281,"en":"Now we have found a ray of hope.","ur":"اب ہمیں امید کی ایک کرن مل گئی ہے۔"},{"n":282,"en":"He didn't even cared for him too","ur":"اس نے اس کی بھی پرواہ نہیں کی"},{"n":283,"en":"You all mischief around all day.","ur":"تم لوگ سارا دن شرارتیں کرتی ہو"},{"n":284,"en":"That's why I'm emphasizing this.","ur":"میں اس لیے اس پر زور دے رہا ہوں"},{"n":285,"en":"Now I'm getting into more tasks.","ur":"ابھی میں اور کاموں پر لگ رہا ہوں"},{"n":286,"en":"And the rain was getting heavier.","ur":"اور بارش تیز ہو رہی تھی۔"},{"n":287,"en":"And today, they have done wonder.","ur":"اور آج تو انہوں نے کمال کر دیا ہے۔"},{"n":288,"en":"Today we will go into that depth.","ur":"آج ہم اُس گہرائی میں اتریں گے۔"},{"n":289,"en":"How carefree we were in the past.","ur":"ماضی میں ہم کتنے لاپرواہ تھے۔"},{"n":290,"en":"I should put my mobile on charge.","ur":"مجھے اپنا موبائل چارج پر رکھنا چاہیے۔"},{"n":291,"en":"I cannot tolerate excessive cold.","ur":"میں زیادہ سردی برداشت نہیں کر سکتا"},{"n":292,"en":"Why don't we make 3 instead of 2.","ur":"کیوں نہ ہم 2 کی جگہ 3 بنائیں"},{"n":293,"en":"If I inference a conclusion today","ur":"اگر میں آج کوئی نتیجہ اخذ کروں"},{"n":294,"en":"The meeting was set for the 27th.","ur":"میٹنگ 27 تاریخ کو طے تھی"},{"n":295,"en":"How much money must I have spent?","ur":"میرے کتنے پیسے لگے ہوں گے"},{"n":296,"en":"The window that is visible behind.","ur":"پیچھے جو کھڑکی نظر آ رہی ہے۔"},{"n":297,"en":"They shook their head and replied.","ur":"انہوں نے سر ہلا کر جواب دیا۔"},{"n":298,"en":"Ahil asked in an unnoticeable way.","ur":"آہل نے غیر محسوس انداز میں پوچھا۔"},{"n":299,"en":"Where can you escape from Shahzad?","ur":"شہزاد سے کہاں بچ سکتے ہو؟"},{"n":300,"en":"You also ruin sleep every morning.","ur":"آپ بھی روز صبح نیند خراب کر دیتی ہیں۔"},{"n":301,"en":"This thing was pricking him a lot.","ur":"اُسے یہ بات بہت چبھ رہی تھی۔"},{"n":302,"en":"In love, sacrifice has to be made.","ur":"محبت میں قربانی دینی پڑتی ہے۔"},{"n":303,"en":"Big desires are not there anymore.","ur":"بڑی بڑی خواہشات نہیں رہیں اب۔"},{"n":304,"en":"That's exactly what I am here for.","ur":"بالکل اسی لیے میں یہاں ہوں۔"},{"n":305,"en":"This way there's no point anymore.","ur":"اس طرح اب کوئی فائدہ نہیں رہا۔"},{"n":306,"en":"Perhaps this is what Allah willed.","ur":"شاید اللہ کو یہی منظور تھا"},{"n":307,"en":"My mom used to party all the time.","ur":"میری امی ہر وقت پارٹی کیا کرتی تھیں"},{"n":308,"en":"The fox will hand over you the gem","ur":"لومڑی تمہیں جواہر دے دے گی"},{"n":309,"en":"My whole world turned upside down.","ur":"میری پوری دنیا الٹ پلٹ ہو گئی"},{"n":310,"en":"He is showing by playing the video.","ur":"ویڈیو چلا کر دکھا رہا ہے۔"},{"n":311,"en":"When he lit up what was around him.","ur":"جب اس نے اس کے ارد گرد جو کچھ تھا روشن کر دیا۔"},{"n":312,"en":"Her distress has increased further.","ur":"اُس کی پریشانی میں مزید اضافہ ہو گیا۔"},{"n":313,"en":"Don't be arrogant about your skill.","ur":"اپنے ہنر پر گھمنڈ مت کرو۔"},{"n":314,"en":"She immediately thought of a trick.","ur":"اُسے فوراً ہی ایک ترکیب سوجھی۔"},{"n":315,"en":"She wrapped a scarf around herself.","ur":"اُس نے دوپٹہ لپیٹ لیا۔"},{"n":316,"en":"I will definitely return the favor.","ur":"میں احسان کا بدلہ ضرور دوں گا۔"},{"n":317,"en":"So that it gets cold in the fridge.","ur":"تاکہ یہ فرج میں ٹھنڈا ہو جائے۔"},{"n":318,"en":"They get by on a very small salary.","ur":"وہ بہت کم تنخواہ پر گزر کر رہے ہیں۔"},{"n":319,"en":"We will make a unilateral decision.","ur":"ہم یکطرفہ فیصلہ کر دیں گے"},{"n":320,"en":"Yesterday my father got tests done.","ur":"کل میرے والد نے ٹیسٹ کروائے"},{"n":321,"en":"That guy whom she has placed there.","ur":"وہ بندہ جسے اس نے وہاں بٹھایا ہے"},{"n":322,"en":"Those who were in debt to my uncle.","ur":"جو میرے ماموں کے قرض دار تھے"},{"n":323,"en":"He has many obligations owed to you","ur":"اس کے آپ پر بہت احسانات ہیں"},{"n":324,"en":"Imran Khan shouldn't have done this.","ur":"عمران خان کو یہ نہیں کرنا چاہیے تھا۔"},{"n":325,"en":"Because its effects go far and wide.","ur":"کیونکہ اس کے اثرات دور دور تک جاتے ہیں۔"},{"n":326,"en":"That mouse whom the lion had let go.","ur":"وہ چوہا جس کو شیر نے جانے دیا تھا۔"},{"n":327,"en":"You should have found light earlier.","ur":"تمہیں پہلے ہی روشنی ڈھونڈ لینی چاہیے تھی۔"},{"n":328,"en":"After that, I haven't laid down yet.","ur":"اس کے بعد میں ابھی تک نہیں لیٹا"},{"n":329,"en":"I'm not able to understand anything.","ur":"میں کچھ سمجھ نہیں پا رہا"},{"n":330,"en":"Our case was scheduled for the 27th.","ur":"ہمارا کیس 27 تاریخ کو لگا تھا"},{"n":331,"en":"This sinner's age is only four years.","ur":"اس گنہگار کی عمر صرف چار سال ہے۔"},{"n":332,"en":"He used to treat his subjects kindly.","ur":"وہ رعایا سے نیک سلوک کیا کرتا تھا۔"},{"n":333,"en":"How much damage might have been done?","ur":"تمہارے خیال میں کتنا نقصان ہوا ہوگا؟"},{"n":334,"en":"The fox climbed onto the goat's back.","ur":"لومڑی بکری کی پیٹھ پر چڑھ گئی۔"},{"n":335,"en":"So the office refused to grant leave.","ur":"تو دفتر نے چھٹی دینے سے انکار کر دیا۔"},{"n":336,"en":"Come, let me put a clip in your hair.","ur":"آؤ، میں تمہارے بالوں میں کلپ لگا دوں۔"},{"n":337,"en":"I've been playing cricket these days.","ur":"میں آج کل کرکٹ کھیل رہا ہوں۔"},{"n":338,"en":"I had no choice but to have breakfast","ur":"میرے پاس ناشتہ کرنے کے سوا کوئی چارہ نہیں تھا"},{"n":339,"en":"He was your favorite player back then.","ur":"وہ اُس وقت آپ کے پسندیدہ کھلاڑی تھے۔"},{"n":340,"en":"This wasn't the case in earlier times.","ur":"پہلے زمانے میں یہ بات نہیں تھی۔"},{"n":341,"en":"And Horia's words remained in between.","ur":"اور حوریہ کی بات درمیان میں ہی رہ گئی۔"},{"n":342,"en":"You will never get this feeling again.","ur":"تمہیں یہ احساس دوبارہ کبھی نہیں ملے گا۔"},{"n":343,"en":"This can be useful in difficult times.","ur":"یہ برے وقت میں کام آ سکتا ہے۔"},{"n":344,"en":"Whatever has to happen, let it happen.","ur":"جو ہونا ہے ہو جائے"},{"n":345,"en":"Can fish and papaya be eaten together?","ur":"مچھلی اور پپیتا ایک ساتھ کھائے جا سکتے ہیں؟"},{"n":346,"en":"He flubbed his chance to win the game.","ur":"اس نے میچ جیتنے کا موقع گنوا دیا۔"},{"n":347,"en":"I used to be lying around intoxicated.","ur":"میں نشے میں پڑا ہوتا تھا"},{"n":348,"en":"My head is itching. I need to scratch.","ur":"میرے سر میں خارش ہو رہی ہے، مجھے کھجانا ہے"},{"n":349,"en":"The world would blame Islam as a whole.","ur":"دنیا اسلام کو مکمل طور پر مورد الزام ٹھہرائے گی۔"},{"n":350,"en":"Who leave a lasting impact on football.","ur":"جو فٹ بال پر دیرپا اثر چھوڑتے ہیں۔"},{"n":351,"en":"The kind of statements that are coming.","ur":"جس قسم کے سٹیٹمنٹس آ رہے ہیں۔"},{"n":352,"en":"Even Sheero never dared to attack them.","ur":"شیرو کو بھی کبھی ان پر حملہ کرنے کی جرات نہیں ہوئی۔"},{"n":353,"en":"You have been watching too many movies.","ur":"آپ بہت زیادہ فلمیں دیکھتے رہے ہیں۔"},{"n":354,"en":"They answered while shaking their head.","ur":"انہوں نے سر ہلاتے ہوئے جواب دیا۔"},{"n":355,"en":"He will burn you and turn you to ashes.","ur":"وہ تمہیں جلا کر خاک کر دے گا۔"},{"n":356,"en":"\"Where can you go hiding from Shahzad?\"","ur":"\"اب شہزاد سے بچ کر کہاں جا سکتے ہیں؟\""},{"n":357,"en":"Just this, that to stay in good health.","ur":"بس یہی کہ اچھی صحت رہے۔"},{"n":358,"en":"Come, let me show you around the field.","ur":"آؤ تمہیں فیلڈ گھماؤں"},{"n":359,"en":"Horia was feeling a lot of pity for him.","ur":"حوریہ کو اُس پر بہت ترس آ رہا تھا۔"},{"n":360,"en":"She used to spend money lavishly before.","ur":"پہلے بہت اسراف سے خرچ کرتی تھی۔"},{"n":361,"en":"Real success lies in not losing courage.","ur":"اصل کامیابی ہمت نہ ہارنے میں ہوتی ہے۔"},{"n":362,"en":"Almonds have a naturally warming effect.","ur":"بادام قدرتی طور پر گرمی پیدا کرتے ہیں۔"},{"n":363,"en":"I grabbed the chair and brought it here.","ur":"میں نے کرسی پکڑی اور یہاں لے آیا"},{"n":364,"en":"A storm of troubles fell upon his mother.","ur":"اُس کی ماں پر مصیبتوں کا طوفان ٹوٹ پڑا۔"},{"n":365,"en":"Good girls' marriage proposals slip away.","ur":"اچھی لڑکیوں کے رشتے ہاتھ سے نکل جاتے ہیں۔"},{"n":366,"en":"But I don't have anyone to practice with.","ur":"لیکن میرے پاس مشق کرنے کے لیے کوئی نہیں ہے۔"},{"n":367,"en":"Green tea has a naturally cooling effect.","ur":"گرین ٹی قدرتی طور پر ٹھنڈک پیدا کرتی ہے۔"},{"n":368,"en":"Imran Khan has given authority to Mahmood.","ur":"عمران خان نے محمود کو اختیار دیا ہے۔"},{"n":369,"en":"Enabling him to settle wherever he wished.","ur":"اسے اس قابل بناتا ہے کہ وہ جہاں چاہے آباد ہو سکے۔"},{"n":370,"en":"In the past, we only looked at the salary.","ur":"ماضی میں ہم صرف تنخواہ دیکھتے تھے۔"},{"n":371,"en":"And the reason goes back a thousand years.","ur":"اور وجہ ہزار سال پرانی ہے"},{"n":372,"en":"In these 3 months, we made a lot of effort","ur":"ان تین مہینوں میں ہم نے بہت بھاگ دوڑ کی"},{"n":373,"en":"We went to a small restaurant by the beach","ur":"ہم ساحل کے قریب ایک چھوٹے ریسٹوران گئے"},{"n":374,"en":"she didn't even show consideration for him","ur":"اس نے اس کا بھی لحاظ نہیں کیا"},{"n":375,"en":"Don't know whose son has been made his son.","ur":"پتا نہیں کس کے بیٹے کو اُس کا بیٹا بنایا ہوا ہے۔"},{"n":376,"en":"The child was also fair-skinned and gentle.","ur":"بچہ تھا بھی گورا اور نرم مُلائم۔"},{"n":377,"en":"She wanted to make Saim spit out the truth.","ur":"وہ سیم کے منہ سے سچ اُگلوانا چاہتی تھی۔"},{"n":378,"en":"It is this thought that takes life forward.","ur":"یہی سوچ زندگی کو آگے لے جاتی ہے۔"},{"n":379,"en":"She flubbed the easy catch in the outfield.","ur":"اس نے آؤٹ فیلڈ میں آسان کیچ چھوڑ دیا۔"},{"n":380,"en":"The word has come true against most of them.","ur":"ان میں سے اکثر کے خلاف یہ بات ثابت ہو چکی ہے۔"},{"n":381,"en":"Shahzad said while moving Horia's hand away.","ur":"شہزاد نے حوریہ کا بازو ہٹاتے ہوئے کہا۔"},{"n":382,"en":"Some journalists have also said good things.","ur":"کچھ صحافیوں نے بھی اچھی باتیں کی ہیں۔"},{"n":383,"en":"Try to put yourself in other people's shoes.","ur":"اپنے آپ کو دوسروں کی جگہ رکھ کر دیکھو۔"},{"n":384,"en":"She focused all of her attention completely.","ur":"اس نے پوری توجہ مرتکز کر دی"},{"n":385,"en":"A question of mine that I am thinking about.","ur":"میرا ایک سوال جس کے بارے میں میں سوچ رہا ہوں"},{"n":386,"en":"But that's not the meaning we are after here","ur":"لیکن یہاں ہمارا مقصد یہ معنی نہیں ہے"},{"n":387,"en":"Thus we did, that We took him away from evil.","ur":"اس طرح ہم نے کیا، تاکہ ہم اسے برائی سے دور کریں۔"},{"n":388,"en":"Then Horia gathered courage and went to them.","ur":"تبھی حوریہ ہمت کر کے اُن کے پاس گئی۔"},{"n":389,"en":"But in the end had to take help from YouTube.","ur":"مگر آخر میں یوٹیوب کی مدد لینی پڑی۔"},{"n":390,"en":"If India has the courage then do it and show.","ur":"اگر انڈیا میں ہمت ہے تو یہ کر کے دکھائے۔"},{"n":391,"en":"It might seem like I am overly praising China.","ur":"ایسا لگ سکتا ہے کہ میں چین کی بہت زیادہ تعریف کر رہا ہوں۔"},{"n":392,"en":"And he never let them disappear from his sight.","ur":"اور وہ انہیں اپنی نظروں سے اوجھل نہیں ہونے دیتا تھا۔"},{"n":393,"en":"It is this fear that forces us to move forward.","ur":"یہ خوف ہی ہمیں آگے بڑھنے پر مجبور کرتا ہے۔"},{"n":394,"en":"When I remember old times, laughter also comes.","ur":"پہلے کا وقت یاد آتا ہے تو ہنسی بھی آ جاتی ہے۔"},{"n":395,"en":"Tomorrow I will ask about Shahbaz's well-being.","ur":"کل شہباز کی خیریت پوچھوں گا"},{"n":396,"en":"If I have found the biggest cheater in my life.","ur":"اگر میں نے اپنی زندگی میں سب سے بڑا دھوکے باز پایا ہے"},{"n":397,"en":"If they knew who we were, we'd be dead already.","ur":"اگر وہ جان لیتے کہ ہم کون ہیں، ہم تب تک مر چکے ہوتے۔"},{"n":398,"en":"But I always used to feel a sense of emptiness.","ur":"لیکن مجھے ہمیشہ خالی پن کا احساس ہوا کرتا تھا"},{"n":399,"en":"And they remained in search of this opportunity.","ur":"اور وہ اس موقع کی تلاش میں رہے۔"},{"n":400,"en":"This matter was so unpleasant to Haroon Rasheed.","ur":"یہ بات ہارون رشید کو اتنی ناگوار گزری۔"},{"n":401,"en":"But we felt our mistake because of Papa's anger.","ur":"لیکن ہمیں اپنی غلطی کا احساس بابا کے غصے کی وجہ سے ہوا۔"},{"n":402,"en":"And I myself wanted to come and apologize to you.","ur":"اور میں خود آکر آپ سے معافی مانگنا چاہتا تھا۔"},{"n":403,"en":"It's been 30 days since my underarms were shaved.","ur":"میرے انڈر آرمز شیو کیے ہوئے 30 دن ہو گئے ہیں"},{"n":404,"en":"It doesn't make sense that we would have 2 bikes.","ur":"یہ معنی نہیں رکھتا کہ ہمارے پاس 2 بائیک ہوں۔"},{"n":405,"en":"At her words, he could only give a helpless smile.","ur":"اُس کی بات پہ یہ بے بس مسکرا سکا۔"},{"n":406,"en":"Then Sahil was made to sit in an office-like room.","ur":"پھر ساحل کو ایک دفتر نما کمرے میں بٹھایا گیا۔"},{"n":407,"en":"Shahzad is waiting for them to run out of bullets.","ur":"شہزاد ان کے گولی ختم ہونے کا انتظار کر رہا ہے۔"},{"n":408,"en":"Due to nervousness, she couldn't even say anything.","ur":"گھبراہٹ کے مارے اُس سے کچھ کہا بھی نہیں جا رہا تھا۔"},{"n":409,"en":"You people must not let go of the grace of culture.","ur":"تم لوگوں نے تہذیب کا دامن نہیں چھوڑنا ہے۔"},{"n":410,"en":"Write something about me too, then I'll believe it.","ur":"میرے بارے میں بھی کچھ لکھو، پھر میں مانوں گا۔"},{"n":411,"en":"The PM didn't go around holding it in hand himself.","ur":"پی ایم خود ہاتھ میں لے کر تو نہیں پھرتا تھا۔"},{"n":412,"en":"By the time she sends the number, I have breakfast.","ur":"جب تک وہ نمبر بھیجتا ہے، میں ناشتہ کر لیتا ہوں"},{"n":413,"en":"But sometimes my heart doesn't feel like doing this.","ur":"لیکن کبھی کبھی میرا دل نہیں چاہ رہا ہوتا کہ میں یہ کروں۔"},{"n":414,"en":"When I will have to go to the ATM to withdraw money.","ur":"جب مجھے اے ٹی ایم سے پیسے نکالنے کے لیے جانا ہوگا"},{"n":415,"en":"That beautiful palace spread over thousands of acres.","ur":"ہزاروں ایکڑ پر پھیلا وہ خوبصورت محل۔"},{"n":416,"en":"All of us will have to endure our share of suffering.","ur":"ہم سب کو اپنے حصے کی مار کھانی پڑے گی۔"},{"n":417,"en":"Which was proof of the family's grandeur and dignity.","ur":"جو گھر والوں کی شان و شوکت کا ثبوت تھا۔"},{"n":418,"en":"I have to repair this with the least amount of money.","ur":"مجھے یہ کم سے کم پیسوں میں ریپیئر کرنا ہے"},{"n":419,"en":"But to get out of the cave will be thoroughly upon you","ur":"لیکن غار سے باہر نکلنا مکمل طور پر تم پر منحصر ہوگا"},{"n":420,"en":"In appearance, they were quite good-looking like a boy.","ur":"دیکھنے میں وہ لڑکے کی طرح کافی خوش شکل تھے۔"},{"n":421,"en":"That Ahil, who deeply hated liars and deceitful people.","ur":"وہ آہل، جسے جھوٹے اور دھوکے باز لوگوں سے سخت نفرت تھی۔"},{"n":422,"en":"In such weather, the pleasure of tea is something else.","ur":"ایسے موسم میں چائے کا مزہ ہی کچھ اور ہے۔"},{"n":423,"en":"How many people are he and she planning the picnic for?","ur":"سنڈی اور باب کتنے لوگوں کے لیے پکنک کا منصوبہ بنا رہے ہیں؟"},{"n":424,"en":"Who looked quite respectable and imposing in appearance.","ur":"جو شکل سے کافی معتبر اور رعب دار نظر آئے۔"},{"n":425,"en":"You lost the passport, yet I didn't say anything to you.","ur":"تم نے پاسپورٹ گم کر دیا پھر بھی میں نے تمہیں کچھ نہیں کہا"},{"n":426,"en":"I didn't got up until I felt the need to use the toilet.","ur":"میں اس وقت تک نہیں اٹھا جب تک مجھے بیت الخلاء جانے کی ضرورت محسوس نہیں ہوئی"},{"n":427,"en":"This apprehension is also being expressed by some people.","ur":"کچھ لوگوں کی طرف سے اس خدشے کا بھی اظہار کیا جا رہا ہے۔"},{"n":428,"en":"Reaching up to their chins, so their heads are forced up.","ur":"ان کی ٹھوڑی تک پہنچتے ہیں، اس لیے ان کے سر کو زبردستی اوپر کیا جاتا ہے۔"},{"n":429,"en":"As long as China's interests are not directly threatened.","ur":"جب تک چین کے انٹرسٹس کو ڈائریکٹ خطرہ نہ ہو۔"},{"n":430,"en":"Tomorrow I will call Waqas and ask him if he wants to go.","ur":"کل میں وقاص کو فون کروں گا اور پوچھوں گا کہ اگر وہ جانا چاہتا ہے۔"},{"n":431,"en":"They tried hard to somehow scare it away from the ground.","ur":"انہوں نے بہت کوششیں کی تھیں کہ کسی طرح سے اسے گراؤنڈ سے ڈرا دیں"},{"n":432,"en":"We had to take a detour because of the road construction.","ur":"سڑک کی تعمیر کی وجہ سے ہمیں دوسرا راستہ لینا پڑا۔"},{"n":433,"en":"They cook very good food, one keeps licking their fingers.","ur":"وہ بہت اچھا کھانا بناتے ہیں، بندہ انگلیاں چاٹتا رہ جاتا ہے۔"},{"n":434,"en":"By evening, almost all the day works tends to be finished.","ur":"شام تک دن کے سارے کام تقریباً ختم ہو گئے ہوتے ہیں"},{"n":435,"en":"It's possible this time something like this may not happen.","ur":"ہو سکتا ہے اب کی بار ایسا کچھ نہ ہو۔"},{"n":436,"en":"She couldn't figure out how to remove his misunderstanding.","ur":"اُسے سمجھ نہیں آیا کہ وہ اُس کی غلط فہمی کو کیسے دور کرے۔"},{"n":437,"en":"The delay that was supposed to happen has already happened.","ur":"جو دیر ہونی تھی وہ ہو چکی۔"},{"n":438,"en":"Today, we are witnessing something of that kind in history.","ur":"آج کی تاریخ میں ہم کچھ ایسی چیز دیکھ رہے ہیں۔"},{"n":439,"en":"A sparkle came into Nida's eyes, she started staying happy.","ur":"ندا کی آنکھوں میں چمک آ گئی، وہ خوش رہنے لگی۔"},{"n":440,"en":"This field is such that you can go as far as you want in it.","ur":"یہ فیلڈ ایسی ہے کہ اب اس میں جتنا چاہیں آگے جا سکتے ہیں۔"},{"n":441,"en":"It's possible he took the name, but it didn't come before me.","ur":"ہو سکتا ہے اس نے نام لیا ہو لیکن میرے سامنے نہیں آیا۔"},{"n":442,"en":"That person was expelled from the court right at that moment.","ur":"اُس شخص کو اُسی وقت دربار سے باہر نکال دیا گیا۔"},{"n":443,"en":"Due to this, severe enmity is being shown towards Imran Khan.","ur":"اسی وجہ سے عمران خان سے شدید دشمنی دکھائی جا رہی ہے۔"},{"n":444,"en":"Perhaps hardly anyone in the world knew where his kingdom was.","ur":"دنیا میں شاید ہی کوئی جانتا تھا کہ اُس کی سلطنت کہاں ہے۔"},{"n":445,"en":"Four people were working, among whom one was using a computer.","ur":"چار بندے کام کر رہے تھے جن میں سے ایک کمپیوٹر استعمال کر رہا تھا"},{"n":446,"en":"He/she must be the one who placed/installed the principal too.","ur":"پرنسپل کو بھی اسی نے بٹھایا ہوگا"},{"n":447,"en":"I'll have breakfast by then, he will have sent the number too.","ur":"میں ناشتہ کر لوں گا، تب تک وہ نمبر بھی بھیج دے گا"},{"n":448,"en":"you didn't see that I give full measure and I am the best host?","ur":"کیا تم نے نہیں دیکھا کہ میں پورا ناپ دیتا ہوں اور میں بہترین میزبان ہوں؟"},{"n":449,"en":"Hearing Horia's words, the boy picked up the bag while smiling.","ur":"حوریہ کی بات سن کر لڑکے نے مسکراتے ہوئے بیگ اٹھایا۔"},{"n":450,"en":"After covering the household expenses, I now have only 2 rupees.","ur":"گھر کا خرچ نکال کر اس وقت میرے پاس 2 روپے ہیں۔"},{"n":451,"en":"Now whomever Imran Khan places his hand on, he becomes the leader.","ur":"اب عمران خان جس پر ہاتھ رکھے گا وہی لیڈر بنتا ہے۔"},{"n":452,"en":"He doesn't even know how to ride a bicycle, let alone drive a car.","ur":"اسے تو سائیکل چلانا بھی نہیں آتا، گاڑی چلانا تو دور کی بات ہے۔"},{"n":453,"en":"I will make such a condition for you that you will always remember.","ur":"تمہارا وہ حال کروں گا کہ تم ہمیشہ یاد کرو گی۔"},{"n":454,"en":"Rather, they always gain goodness by helping the poor and the weak.","ur":"بلکہ وہ ہمیشہ غریبوں اور کمزوروں کی مدد کر کے بھلائی حاصل کرتے ہیں۔"},{"n":455,"en":"The villagers advised the wise boy to give the king true happiness.","ur":"گاؤں والوں نے عقلمند لڑکے کو بادشاہ کو سچی خوشی دینے کا مشورہ دیا۔"},{"n":456,"en":"But the crop matured and sold for an even higher price than before.","ur":"لیکن کھیت پک کر پہلے سے بھی زیادہ قیمت پر نکل گیا۔"},{"n":457,"en":"Saim is even older than Mahi and is still roaming around unmarried.","ur":"سیم تو ماہی سے بھی بڑا ہے اور ابھی تک کنوارا گھوم رہا ہے۔"},{"n":458,"en":"I've gone through the guest list, but that name doesn't ring a bell.","ur":"میں نے مہمانوں کی فہرست دیکھ لی ہے، لیکن وہ نام سن کر کچھ یاد نہیں آتا۔"},{"n":459,"en":"I stayed up late night watching videos and then couldn't fall asleep.","ur":"میں دیر رات تک ویڈیوز دیکھتا رہا اور پھر نیند نہیں آئی۔"},{"n":460,"en":"Does Shahzad feel comfortable opening up about his personal problems?","ur":"کیا شہزاد اپنی ذاتی مشکلات کے بارے میں کھل کر بات کرنے میں آرام دہ محسوس کرتا ہے؟"},{"n":461,"en":"Today they were chatting with the one of a car seller on social media","ur":"آج وہ سوشل میڈیا پر کار فروشوں میں سے ایک کے ساتھ گفتگو کر رہے تھے"},{"n":462,"en":"He sat down very tired and, taking a deep breath, got lost in thought.","ur":"بہت تھک کر بیٹھ گیا اور گہری سانس لیتے ہوئے سوچ میں گم ہو گیا۔"},{"n":463,"en":"The government gave financial support to the families of fallen soldiers.","ur":"حکومت نے شہداء کے خاندانوں کو مالی مدد فراہم کی۔"},{"n":464,"en":"Earlier people used to work harder, now everything has come onto the screen.","ur":"پہلے لوگ محنت زیادہ کرتے تھے، اب سب کچھ اسکرین پر آ گیا ہے۔"},{"n":465,"en":"If I don't finish it, at least there should be enough so that we can get by.","ur":"اگر میں نے ختم نہیں کیا تو کم از کم اتنا ہو کہ گزارہ ہو جائے"},{"n":466,"en":"Today, we have to go out for those works which are lying for us from several days.","ur":"آج ہمیں ان کاموں کے لیے باہر جانا ہے جو کئی دنوں سے ہمارے منتظر ہیں"},{"n":467,"en":"And Mahi wasn't going to speak anyway, so whatever had to be done, only I had to do it.","ur":"اور ماہی نے تو ویسے ہی نہیں بولنا تھا، تو جو کرنا تھا مجھے ہی کرنا تھا۔"},{"n":468,"en":"\"The Professor,\" due to his intelligent approach to the game, both as a player and a thinker.","ur":"\"دی پروفیسر\" کھیل کے تئیں اپنی ذہین سوچ کی وجہ سے، بطور کھلاڑی اور مفکر۔"},{"n":469,"en":"And Horia, while adjusting her shawl, went into a street, paid the rickshaw driver, and got down.","ur":"اور حوریہ اپنی چادر ٹھیک کرتے ہوئے ایک گلی میں جا کر رکشے والے کو کرایہ دے کر اتر گئی۔"},{"n":470,"en":"Hearing this, the rich man added another 50 to those 50 rupees and gave the farmer a full 100 rupees.","ur":"یہ سن کر اُس امیر آدمی نے اُن 50 روپے میں مزید 50 ملا کر کسان کو پورے 100 روپے دے دیے۔"},{"n":471,"en":"She kept sticking her head out of the rickshaw repeatedly and looked back at her uncle riding the motorcycle.","ur":"حوریہ بار بار سر رکشے سے باہر نکال کر پیچھے موٹرسائیکل پر سوار اپنے چچا کو دیکھتی۔"},{"n":472,"en":"The hikers had to survive without modern gear in a primitive campsite that lacked electricity and running water.","ur":"پیدل سفر کرنے والوں کو جدید سامان کے بغیر ایک سادہ کیمپ میں گزارا کرنا پڑا جہاں نہ بجلی تھی نہ نلکے کا پانی۔"},{"n":473,"en":"The workers prepared the old walls for renovation by stripping them off layer by layer, removing all the ancient wallpaper and chipped paint.","ur":"مزدوروں نے پرانی دیواروں کو تہہ در تہہ اکھاڑ کر مرمت کے لیے تیار کیا، اور تمام پرانا وال پیپر اور اکھڑا ہوا رنگ ہٹا دیا۔"}];
+const $=id=>document.getElementById(id);
 
 // ---------- storage ----------
-const KEY = 'bks-progress-v1';
-function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){ return null; } }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(st)); }catch(e){} }
-let st = load() || { queue: SENTENCES.map(s=>s.n), pos: 0, done: {}, skipped: {}, round: 1 };
+const KEY='bks-progress-v1', SKEY='bks-settings-v1';
+function lget(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
+function lset(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+let st = lget(KEY) || { queue: SENTENCES.map(s=>s.n), pos: 0, done: {}, skipped: {}, round: 1 };
+let cfg = Object.assign({ lang:'en-IN', gemOn:false, gemKey:'', gemModel:'gemini-flash-latest' }, lget(SKEY)||{});
+function save(){ lset(KEY, st); }
 
 // ---------- text matching ----------
 const ONES=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
@@ -146,7 +181,6 @@ function numWords(n){
   if(n<20) return ONES[n];
   if(n<100) return TENS[Math.floor(n/10)]+(n%10?' '+ONES[n%10]:'');
   if(n<1000) return ONES[Math.floor(n/100)]+' hundred'+(n%100?' '+numWords(n%100):'');
-  if(n>=1100 && n<10000 && n%100!==0 && Math.floor(n/100)%10!==0) return numWords(Math.floor(n/100))+' '+numWords(n%100); // 2025 -> twenty twenty five
   if(n<1000000) return numWords(Math.floor(n/1000))+' thousand'+(n%1000?' '+numWords(n%1000):'');
   return String(n);
 }
@@ -154,7 +188,8 @@ const ORD={one:'first',two:'second',three:'third',five:'fifth',eight:'eighth',ni
 function ordWords(n){ const w=numWords(n).split(' '); const l=w.pop(); w.push(ORD[l]|| (l.endsWith('y')? l.slice(0,-1)+'ieth' : l+'th')); return w.join(' '); }
 const CONTR=[[/\bhe or she\b/g,'he/she'],[/\bwon't\b/g,'will not'],[/\bcan't\b/g,'cannot'],[/\bshan't\b/g,'shall not'],[/\bain't\b/g,'is not'],
  [/n't\b/g,' not'],[/'re\b/g,' are'],[/'ve\b/g,' have'],[/'ll\b/g,' will'],[/'m\b/g,' am'],[/'d\b/g,' would'],
- [/\b(it|that|there|what|he|she|who|here|where|how|let)'s\b/g,'$1 is'],[/\blet is\b/g,'let us'],[/\bcan not\b/g,'cannot'],[/\bok\b/g,'okay']];
+ [/\b(it|that|there|what|he|she|who|here|where|how|let)'s\b/g,'$1 is'],[/\blet is\b/g,'let us'],[/\bcan not\b/g,'cannot'],[/\bok\b/g,'okay'],
+ [/\btwenty twenty\b/g,'two thousand twenty']];
 function norm(text){
   let t=(text||'').toLowerCase().replace(/[’‘`´]/g,"'").replace(/[“”]/g,'"');
   t=t.replace(/(\d+)(st|nd|rd|th)\b/g,(m,d)=>' '+ordWords(+d)+' ');
@@ -164,10 +199,10 @@ function norm(text){
   t=t.replace(/[-–—]/g,' ').replace(/[^a-z0-9/ ]+/g,' ');
   return t.split(/\s+/).filter(Boolean);
 }
-// target words may hold options like "it/he": each slot is a list of accepted words
 function targetSlots(en){
   en=(en||'').replace(/[’‘]/g,"'").replace(/\b(it|that|there|what|he|she|who|here|where|how)'s\b/gi,'$1 is/has').replace(/(\w)'d\b/g,'$1 would/had');
-  return norm(en).map(w=>w.split('/').filter(Boolean)); }
+  return norm(en).map(w=>w.split('/').filter(Boolean));
+}
 function spokenWords(t){ return norm(t).flatMap(w=>w.split('/')).filter(Boolean); }
 function matches(slots, words){
   for(let s=0; s+slots.length<=words.length; s++){
@@ -178,13 +213,11 @@ function matches(slots, words){
   return false;
 }
 function markHeard(slots, words){
-  // colour each heard word: green if it is somewhere in the target, orange if not
   const all=new Set(slots.flat());
   return words.map(w=>`<span class="${all.has(w)?'w-ok':'w-bad'}">${w}</span>`).join(' ');
 }
 
-// ---------- UI ----------
-const $=id=>document.getElementById(id);
+// ---------- screen ----------
 const byN=Object.fromEntries(SENTENCES.map(s=>[s.n,s]));
 let cur=null, slots=[], busy=false;
 $('total').textContent=SENTENCES.length;
@@ -192,93 +225,167 @@ $('total').textContent=SENTENCES.length;
 function show(){
   if(st.pos>=st.queue.length){ finishRound(); return; }
   cur=byN[st.queue[st.pos]]; slots=targetSlots(cur.en);
-  $('num').textContent='No. '+cur.n; $('ur').textContent=cur.ur; $('answer').textContent='';
-  $('heard').textContent=''; $('pos').textContent=st.pos+1; $('total').textContent=st.queue.length;
+  $('num').textContent='No. '+cur.n; $('ur').textContent=cur.ur;
+  hideWords(); $('heard').textContent=''; setVerdict('');
+  $('pos').textContent=st.pos+1; $('total').textContent=st.queue.length;
   $('barFill').style.width=(st.pos/st.queue.length*100)+'%';
+  gemTried=new Set();
 }
-function advance(kind){
+function showWords(){ if(!cur) return; $('wordsText').textContent=cur.en; $('words').hidden=false; $('answerBtn').textContent='Hide words'; }
+function hideWords(){ $('words').hidden=true; $('answerBtn').textContent='Show words'; }
+function toggleWords(){ $('words').hidden ? showWords() : hideWords(); }
+function setVerdict(t,cls){ $('verdict').textContent=t; $('verdict').className='verdict'+(cls?' '+cls:''); }
+
+function advance(kind, viaGemini){
   if(busy||!cur) return; busy=true;
   if(kind==='ok'){ st.done[cur.n]=(st.done[cur.n]||0)+1; delete st.skipped[cur.n]; $('card').classList.add('ok'); try{navigator.vibrate&&navigator.vibrate(40);}catch(e){} }
   else { st.skipped[cur.n]=1; }
   st.pos++; save();
+  if(viaGemini){ showWords(); setVerdict('✓ Right meaning. The saved words are shown above.','good'); }
+  const wait = kind!=='ok' ? 0 : (viaGemini ? 1800 : 350);
   setTimeout(()=>{
     $('card').classList.add('out');
     setTimeout(()=>{
       $('card').classList.remove('out','ok'); $('card').classList.add('in'); show();
       requestAnimationFrame(()=>requestAnimationFrame(()=>$('card').classList.remove('in')));
-      busy=false; resetListening();
+      busy=false; markNewSentence();
     },260);
-  }, kind==='ok'?350:0);
+  }, wait);
 }
 function finishRound(){
   stopListening();
-  const left=Object.keys(st.skipped).map(Number);
-  $('num').textContent=''; $('ur').textContent='شاباش! سب جملے مکمل';
-  $('answer').textContent= left.length ? `Round done. ${left.length} skipped — open ☰ to practise them.` : 'Round done. All sentences said right!';
+  const left=Object.keys(st.skipped).length;
+  $('num').textContent=''; $('ur').textContent='شاباش! سب جملے مکمل'; $('tapHint').hidden=true;
+  setVerdict(left ? `Round done. ${left} skipped. Open ☰ to practise them.` : 'Round done. All sentences said right!','good');
   $('barFill').style.width='100%'; cur=null;
 }
-function revealAnswer(){ if(cur) $('answer').textContent=cur.en; }
+
+// ---------- Gemini meaning check ----------
+let gemTried=new Set(), gemBusy=false;
+async function askGemini(urdu, ref, said){
+  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.gemModel||'gemini-flash-latest')}:generateContent`;
+  const prompt=`You check English translations of Urdu sentences for a learner.
+Urdu sentence: ${urdu}
+Reference English: ${ref}
+Learner said (speech-to-text, may lack punctuation and have small recognition errors): ${said}
+Is the learner's English a correct translation with the same meaning as the Urdu? Accept different wording, synonyms and small grammar slips if the meaning is clearly the same. Reject if meaning is changed, incomplete, or key information is missing.
+Reply only with JSON: {"correct": true or false, "tip": "very short hint in simple English if wrong, else empty"}`;
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':cfg.gemKey},
+    body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0,responseMimeType:'application/json'}})});
+  if(!res.ok){ const t=await res.text(); throw new Error(res.status+': '+t.slice(0,160)); }
+  const j=await res.json();
+  const txt=j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'{}';
+  return JSON.parse(txt.replace(/```json|```/g,'').trim());
+}
+async function checkWithGemini(said){
+  if(!cfg.gemOn||!cfg.gemKey||!cur||busy||gemBusy) return;
+  const words=spokenWords(said);
+  if(words.length < Math.max(1, Math.ceil(slots.length*0.5))) return;   // too short, wait for more
+  const key=words.join(' '); if(gemTried.has(key)) return; gemTried.add(key);
+  const forN=cur.n; gemBusy=true; setVerdict('Checking meaning with Gemini…');
+  try{
+    const r=await askGemini(cur.ur, cur.en, said);
+    if(!cur||cur.n!==forN) return;
+    if(r.correct) advance('ok', true);
+    else setVerdict('✗ Not quite. '+(r.tip||'Try again.'),'bad');
+  }catch(e){ setVerdict('Gemini error: '+e.message,'bad'); }
+  finally{ gemBusy=false; }
+}
 
 // ---------- speech ----------
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-let rec=null, wantOn=false, lockTry=null;
+let rec=null, wantOn=false, wakeLock=null, baseIndex=0, lastFinal='', restartTimer=null;
 function setStatus(t,on){ $('status').textContent=t; $('heardBox').classList.toggle('listening',!!on); }
-function startListening(){
-  if(!SR) return;
-  wantOn=true; makeRec(); try{rec.start();}catch(e){}
-  keepAwake();
-}
-function makeRec(){
-  if(rec){ rec.onend=null; try{rec.abort();}catch(e){} }
-  rec=new SR(); rec.lang='en-US'; rec.interimResults=true; rec.maxAlternatives=5; rec.continuous=false;
-  rec.onstart=()=>setStatus('Listening… say it in English',true);
-  rec.onresult=e=>{
-    if(!cur||busy) return;
-    let shown='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const r=e.results[i];
-      for(let a=0;a<r.length;a++){
-        const words=spokenWords(r[a].transcript);
-        if(words.join(' ')==='skip' && r.isFinal){ advance('skip'); return; }
-        if(/^(answer|show answer)$/.test(words.join(' ')) && r.isFinal){ revealAnswer(); return; }
-        if(matches(slots,words)){ $('heard').innerHTML=markHeard(slots,words); advance('ok'); return; }
-      }
-      shown=r[0].transcript;
-    }
-    if(shown) $('heard').innerHTML=markHeard(slots,spokenWords(shown));
-  };
-  rec.onerror=e=>{
-    if(e.error==='not-allowed'||e.error==='service-not-allowed'){ wantOn=false; showErr('Microphone is blocked. Tap the lock icon in the address bar, allow the microphone, then reload.'); }
-    else if(e.error==='network'){ showErr('No internet. Speech needs internet to work.'); }
+function markNewSentence(){ baseIndex = rec && rec._len ? rec._len : 0; lastFinal=''; if(wantOn && !rec) startRec(); }
+
+function startRec(){
+  if(!SR||!wantOn) return;
+  if(rec){ rec.onend=null; rec.onresult=null; rec.onerror=null; try{rec.abort();}catch(e){} }
+  const r=new SR(); rec=r; r._len=0; baseIndex=0;
+  r.lang=cfg.lang; r.interimResults=true; r.maxAlternatives=5; r.continuous=true;
+  r.onstart=()=>setStatus('Listening… say it in English',true);
+  r.onresult=e=>onResult(e);
+  r.onerror=e=>{
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'){ wantOn=false; showErr('Microphone is blocked. Tap the lock icon next to the address, allow Microphone, then reload.'); }
+    else if(e.error==='network'){ showErr('Internet problem. Speech needs internet. Retrying…'); }
     else if(e.error==='audio-capture'){ showErr('No microphone found.'); }
   };
-  rec.onend=()=>{ if(wantOn){ setTimeout(()=>{ if(wantOn){ try{rec.start();}catch(err){ makeRec(); try{rec.start();}catch(e2){} } } },150); } else setStatus('Not listening',false); };
+  r.onend=()=>{ if(rec!==r) return; if(wantOn){ clearTimeout(restartTimer); restartTimer=setTimeout(startRec,60); } else setStatus('Not listening',false); };
+  try{ r.start(); }catch(e){ clearTimeout(restartTimer); restartTimer=setTimeout(startRec,300); }
 }
-function resetListening(){ if(wantOn){ makeRec(); try{rec.start();}catch(e){} } }
+function onResult(e){
+  rec._len=e.results.length;
+  if(!cur||busy) return;
+  // collect what was said since this sentence appeared
+  let finals=[], interim='';
+  for(let i=baseIndex;i<e.results.length;i++){
+    const r=e.results[i];
+    if(r.isFinal) finals.push(r[0].transcript); else interim+=' '+r[0].transcript;
+  }
+  const candidates=new Set();
+  for(let i=Math.max(baseIndex,e.resultIndex);i<e.results.length;i++){
+    const r=e.results[i];
+    for(let a=0;a<r.length;a++){
+      candidates.add(r[a].transcript);
+      if(finals.length) candidates.add(finals.slice(-1)[0]+' '+r[a].transcript); // sentence split over two pieces
+    }
+  }
+  const joined=(finals.slice(-2).join(' ')+' '+interim).trim();
+  candidates.add(joined);
+  for(const c of candidates){
+    const w=spokenWords(c), k=w.join(' ');
+    if(k==='skip'||k.endsWith(' skip')){ if(e.results[e.results.length-1].isFinal){ advance('skip'); return; } }
+    if(/(^| )(show words|show answer)$/.test(k)){ showWords(); }
+    if(matches(slots,w)){ $('heard').innerHTML=markHeard(slots,w); setVerdict('✓ Exact!','good'); advance('ok'); return; }
+  }
+  const latest=(finals.slice(-1)[0]||'')+' '+interim;
+  $('heard').innerHTML=markHeard(slots,spokenWords(joined.length>120?latest:joined));
+  // when a phrase is finished and not exact, ask Gemini about the meaning
+  const last=e.results[e.results.length-1];
+  if(last.isFinal){ const said=finals.slice(-1)[0]; if(said && said!==lastFinal){ lastFinal=said; checkWithGemini(said); } }
+}
+function startListening(){ if(!SR) return; wantOn=true; $('errNote').hidden=true; startRec(); keepAwake(); }
 function stopListening(){ wantOn=false; if(rec){ try{rec.abort();}catch(e){} } setStatus('Not listening',false); }
-function showErr(t){ $('errNote').textContent=t; $('errNote').hidden=false; setStatus('Stopped',false); }
-async function keepAwake(){ try{ if('wakeLock' in navigator && !lockTry) { lockTry=await navigator.wakeLock.request('screen'); lockTry.addEventListener('release',()=>lockTry=null);} }catch(e){} }
+function showErr(t){ $('errNote').textContent=t; $('errNote').hidden=false; }
+async function keepAwake(){ try{ if('wakeLock' in navigator && !wakeLock){ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>wakeLock=null);} }catch(e){} }
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){ if(rec){ try{rec.abort();}catch(e){} } }
-  else if(wantOn){ resetListening(); keepAwake(); }
+  if(document.hidden){ if(rec){ rec.onend=null; try{rec.abort();}catch(e){} rec=null; } }
+  else if(wantOn){ startRec(); keepAwake(); }
 });
 
 // ---------- buttons ----------
 $('startBtn').onclick=()=>{ $('startScreen').hidden=true; show(); startListening(); };
 $('skipBtn').onclick=()=>advance('skip');
-$('answerBtn').onclick=revealAnswer;
-$('menuBtn').onclick=()=>{
+$('answerBtn').onclick=toggleWords;
+$('card').onclick=toggleWords;
+$('card').onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleWords(); } };
+function fillMenu(){
   $('sDone').textContent=Object.keys(st.done).length; $('sSkip').textContent=Object.keys(st.skipped).length;
   $('sLeft').textContent=Math.max(0,st.queue.length-st.pos); $('sRounds').textContent=st.round;
-  $('menuScreen').hidden=false;
+  $('langSel').value=cfg.lang; $('gemOn').checked=cfg.gemOn; $('gemKey').value=cfg.gemKey; $('gemModel').value=cfg.gemModel; $('gemTestOut').textContent='';
+}
+function readMenu(){
+  const oldLang=cfg.lang;
+  cfg.lang=$('langSel').value; cfg.gemOn=$('gemOn').checked; cfg.gemKey=$('gemKey').value.trim(); cfg.gemModel=$('gemModel').value.trim()||'gemini-flash-latest';
+  lset(SKEY,cfg); return oldLang!==cfg.lang;
+}
+function closeMenuAnd(fn){ const langChanged=readMenu(); $('menuScreen').hidden=true; if(fn) fn(); if(!cur) show(); if(!wantOn) startListening(); else if(langChanged) startRec(); }
+$('menuBtn').onclick=()=>{ fillMenu(); $('menuScreen').hidden=false; };
+$('closeMenu').onclick=()=>closeMenuAnd();
+$('restartBtn').onclick=()=>closeMenuAnd(()=>{ st.queue=SENTENCES.map(s=>s.n); st.pos=0; st.skipped={}; st.round++; save(); $('tapHint').hidden=false; show(); });
+$('skippedBtn').onclick=()=>{ const s=Object.keys(st.skipped).map(Number).sort((a,b)=>a-b); if(!s.length){ $('skippedBtn').textContent='No skipped sentences'; return; } closeMenuAnd(()=>{ st.queue=s; st.pos=0; save(); $('tapHint').hidden=false; show(); }); };
+$('jumpBtn').onclick=()=>{ const n=+$('jumpTo').value; if(!byN[n]) return; closeMenuAnd(()=>{ st.queue=SENTENCES.map(s=>s.n); st.pos=st.queue.indexOf(n); save(); $('tapHint').hidden=false; show(); }); };
+$('gemTest').onclick=async()=>{
+  readMenu(); const out=$('gemTestOut');
+  if(!cfg.gemKey){ out.textContent='Paste your key first.'; out.className='verdict bad'; return; }
+  out.textContent='Testing…'; out.className='verdict';
+  try{ const r=await askGemini('میں سمجھ گیا','I got you','I understood');
+       out.textContent = r.correct ? '✓ Gemini works. "I understood" was accepted for "I got you".' : 'Gemini answered, but said no. It still works.'; out.className='verdict good'; }
+  catch(e){ out.textContent='✗ '+e.message; out.className='verdict bad'; }
 };
-$('closeMenu').onclick=()=>{ $('menuScreen').hidden=true; if(!cur) show(); if(!wantOn) startListening(); };
-$('restartBtn').onclick=()=>{ st.queue=SENTENCES.map(s=>s.n); st.pos=0; st.skipped={}; st.round++; save(); $('menuScreen').hidden=true; show(); startListening(); };
-$('skippedBtn').onclick=()=>{ const s=Object.keys(st.skipped).map(Number).sort((a,b)=>a-b); if(!s.length){ $('skippedBtn').textContent='No skipped sentences'; return; } st.queue=s; st.pos=0; save(); $('menuScreen').hidden=true; show(); startListening(); };
-$('jumpBtn').onclick=()=>{ const n=+$('jumpTo').value; if(!byN[n]) return; st.queue=SENTENCES.map(s=>s.n); st.pos=st.queue.indexOf(n); save(); $('menuScreen').hidden=true; show(); startListening(); };
 
 // ---------- first screen ----------
-if(!SR){ $('supportNote').hidden=false; $('supportNote').textContent='This browser cannot hear speech. Please open this page in Google Chrome on your phone.'; }
+if(!SR){ $('supportNote').hidden=false; $('supportNote').textContent='This browser cannot hear speech. Please open this page in Google Chrome.'; }
 if(st.pos>0 && st.pos<st.queue.length) $('resumeInfo').textContent=`You stopped at ${st.pos+1} of ${st.queue.length}. Tap start to continue.`;
 </script>
 </body>
