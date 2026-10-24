@@ -93,12 +93,12 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 <body>
 
 <div class="screen" id="startScreen">
-  <h1>Bol Ke Seekho</h1>
+  <h1>Bol Ke Seekho <small style="font-size:.9rem;color:var(--muted);font-weight:500">v6</small></h1>
   <p class="urt">اردو پڑھیں، انگریزی میں بولیں</p>
   <ul>
     <li>Read the Urdu sentence and say it in English.</li>
-    <li>Exact words move you ahead. With Gemini, your own words are accepted if the meaning is right.</li>
-    <li>Speak clearly, then pause. The app checks when you stop talking.</li>
+    <li>Say it right and the next sentence appears at once.</li>
+    <li>Small hearing mistakes by the phone are forgiven. You can make it strict in ☰.</li>
     <li>Tap the Urdu card to see the real English words.</li>
     <li>Say <b>"skip"</b> to skip.</li>
   </ul>
@@ -121,10 +121,15 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
   <button id="restartBtn">Start again from 1</button>
 
   <h1 style="font-size:1.3rem;margin-top:8px">Settings</h1>
+  <div class="field"><label for="strictSel">How strict</label>
+    <select id="strictSel">
+      <option value="small">Allow small hearing mistakes (recommended)</option>
+      <option value="exact">Exact words only</option>
+    </select></div>
   <div class="field"><label for="engSel">Who listens to me</label>
     <select id="engSel">
-      <option value="gemini">Gemini (best for my accent, needs key)</option>
-      <option value="phone">Phone (free, less accurate)</option>
+      <option value="phone">Phone (instant)</option>
+      <option value="gemini">Gemini (slower, 1–2 sec each)</option>
     </select></div>
   <div class="field"><label for="langSel">Phone listening accent</label>
     <select id="langSel">
@@ -133,7 +138,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
       <option value="en-US">English (US)</option>
       <option value="en-GB">English (UK)</option>
     </select></div>
-  <label class="check"><input type="checkbox" id="gemOn"> Accept my own words if the meaning is right</label>
+  <label class="check"><input type="checkbox" id="gemOn"> Gemini checks my own words when they are not exact (optional)</label>
   <div class="field"><label for="gemKey">Gemini API key (saved only on this phone)</label>
     <input id="gemKey" type="password" autocomplete="off" placeholder="Paste your key here"></div>
   <div class="field"><label for="gemModel">Gemini model</label>
@@ -144,7 +149,7 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 </div>
 
 <div class="top">
-  <span class="brand">Bol Ke Seekho <small style="font-weight:500;color:var(--muted);font-size:.7rem">v4</small></span>
+  <span class="brand">Bol Ke Seekho <small style="font-weight:500;color:var(--muted);font-size:.7rem">v6</small></span>
   <span class="count"><b id="pos">1</b> / <span id="total">0</span></span>
   <button class="icon-btn" id="menuBtn" aria-label="Menu">☰</button>
 </div>
@@ -180,7 +185,9 @@ const KEY='bks-progress-v1', SKEY='bks-settings-v1';
 function lget(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
 function lset(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 let st = lget(KEY) || { queue: SENTENCES.map(s=>s.n), pos: 0, done: {}, skipped: {}, round: 1 };
-let cfg = Object.assign({ engine:'gemini', lang:'en-IN', gemOn:true, gemKey:'', gemModel:'gemini-flash-latest' }, lget(SKEY)||{});
+let cfg = Object.assign({ engine:'phone', strict:'small', lang:'en-IN', gemOn:false, gemKey:'', gemModel:'gemini-flash-lite-latest' }, lget(SKEY)||{});
+if(cfg.gemModel==='gemini-flash-latest') cfg.gemModel='gemini-flash-lite-latest';
+if(!cfg.v6){ cfg.engine='phone'; cfg.gemOn=false; cfg.strict='small'; cfg.v6=true; lset(SKEY,cfg); }
 function save(){ lset(KEY, st); }
 
 // ---------- text matching ----------
@@ -234,6 +241,45 @@ function matches(slots, words){
   }
   return false;
 }
+function editDist(a,b){
+  const m=a.length,n=b.length; if(!m) return n; if(!n) return m;
+  let prev=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){ const curRow=[i]; for(let j=1;j<=n;j++){ curRow[j]=Math.min(prev[j]+1,curRow[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1)); } prev=curRow; }
+  return prev[n];
+}
+function soundex(w){
+  const map={b:1,f:1,p:1,v:1,c:2,g:2,j:2,k:2,q:2,s:2,x:2,z:2,d:3,t:3,l:4,m:5,n:5,r:6};
+  w=w.replace(/[^a-z]/g,''); if(!w) return '';
+  let first=/[aeiouyhw]/.test(w[0])?'V':w[0].toUpperCase(), out='', last=map[w[0]]||0;
+  for(let i=1;i<w.length;i++){ const c=map[w[i]]||0; if(c&&c!==last) out+=c; if(!/[hw]/.test(w[i])) last=c; }
+  return (first+out+'000').slice(0,4);
+}
+function wordCost(opts,w){
+  if(opts.includes(w)) return 0;
+  let best=1;
+  for(const o of opts){
+    if(o.length>=2 && w.length>=2 && soundex(o)===soundex(w)) { best=0.5; continue; }   // sounds the same: sore/soar, it/eat
+    const L=Math.max(o.length,w.length); if(L>=4 && editDist(o,w)<=Math.max(1,Math.floor(L/4))) best=Math.min(best,0.5);
+  }
+  return best;
+}
+// how far the spoken words are from the sentence (0 = exact). Extra words before/after are free.
+function distance(slots, words){
+  const n=slots.length, m=words.length; if(!n) return 0;
+  let prev=new Array(m+1).fill(0);
+  for(let i=1;i<=n;i++){
+    const row=[i];
+    for(let j=1;j<=m;j++) row[j]=Math.min(prev[j-1]+wordCost(slots[i-1],words[j-1]), prev[j]+1, row[j-1]+1);
+    prev=row;
+  }
+  return Math.min(...prev);
+}
+function closeEnough(slots, words){
+  if(matches(slots,words)) return true;
+  if(cfg.strict==='exact') return false;
+  const n=slots.length, allow = n<=6 ? 0.5 : n<=11 ? 1 : Math.min(2.5, 0.15*n);   // short: one sound-alike word; long: a little more
+  return distance(slots,words) <= allow;
+}
 function markHeard(slots, words){
   const all=new Set(slots.flat());
   return words.map(w=>`<span class="${all.has(w)?'w-ok':'w-bad'}">${w}</span>`).join(' ');
@@ -264,7 +310,7 @@ function advance(kind, viaGemini){
   else { st.skipped[cur.n]=1; }
   st.pos++; save();
   if(viaGemini){ showWords(); setVerdict('✓ Right meaning. The saved words are shown above.','good'); }
-  const wait = kind!=='ok' ? 0 : (viaGemini ? 1800 : 350);
+  const wait = kind!=='ok' ? 0 : (viaGemini ? 1500 : 200);
   setTimeout(()=>{
     $('card').classList.add('out');
     setTimeout(()=>{
@@ -283,21 +329,34 @@ function finishRound(){
 }
 
 // ---------- Gemini meaning check ----------
+async function gemRequest(parts){
+  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.gemModel||'gemini-flash-lite-latest')}:generateContent`;
+  const send=async(fast)=>{
+    const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),15000);
+    const gc={temperature:0,responseMimeType:'application/json',maxOutputTokens:200};
+    if(fast) gc.thinkingConfig={thinkingBudget:0};
+    try{ return await fetch(url,{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/json','x-goog-api-key':cfg.gemKey},
+      body:JSON.stringify({contents:[{parts}],generationConfig:gc})}); }
+    catch(e){ throw new Error(e.name==='AbortError'?'Gemini took too long. Check your internet and try again.':'Internet problem: '+e.message); }
+    finally{ clearTimeout(t); }
+  };
+  let res=await send(true);
+  if(res.status===400){ const t=await res.clone().text(); if(/thinking/i.test(t)) res=await send(false); }
+  if(!res.ok){ const t=await res.text(); const err=new Error(res.status===429?'Gemini is busy (too many tries). Wait a few seconds.':res.status+': '+t.slice(0,140)); err.status=res.status; throw err; }
+  const j=await res.json();
+  const txt=j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'{}';
+  return JSON.parse(txt.replace(/```json|```/g,'').trim());
+}
+
 let gemTried=new Set(), gemBusy=false;
 async function askGemini(urdu, ref, said){
-  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.gemModel||'gemini-flash-latest')}:generateContent`;
   const prompt=`You check English translations of Urdu sentences for a learner.
 Urdu sentence: ${urdu}
 Reference English: ${ref}
 Learner said (speech-to-text, may lack punctuation and have small recognition errors): ${said}
 Is the learner's English a correct translation with the same meaning as the Urdu? Accept different wording, synonyms and small grammar slips if the meaning is clearly the same. Reject if meaning is changed, incomplete, or key information is missing.
 Reply only with JSON: {"correct": true or false, "tip": "very short hint in simple English if wrong, else empty"}`;
-  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':cfg.gemKey},
-    body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0,responseMimeType:'application/json'}})});
-  if(!res.ok){ const t=await res.text(); throw new Error(res.status+': '+t.slice(0,160)); }
-  const j=await res.json();
-  const txt=j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'{}';
-  return JSON.parse(txt.replace(/```json|```/g,'').trim());
+  return gemRequest([{text:prompt}]);
 }
 async function checkWithGemini(said){
   if(!cfg.gemOn||!cfg.gemKey||!cur||busy||gemBusy) return;
@@ -316,7 +375,6 @@ async function checkWithGemini(said){
 
 
 async function geminiListen(wavB64, urdu, ref){
-  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.gemModel||'gemini-flash-latest')}:generateContent`;
   const prompt=`A Pakistani learner is practising English. They see this Urdu sentence and say its English translation aloud.
 Urdu sentence: ${urdu}
 Reference English: ${ref}
@@ -325,13 +383,7 @@ The audio is the learner speaking. Tasks:
 2. "correct": true if what they said is a correct English translation with the same meaning as the Urdu (different wording and synonyms are fine, small grammar slips are fine); false if the meaning is changed, incomplete or missing.
 3. "tip": if not correct, a very short hint in simple English; else "".
 Reply only with JSON: {"heard": "...", "correct": true/false, "tip": "..."}`;
-  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':cfg.gemKey},
-    body:JSON.stringify({contents:[{parts:[{text:prompt},{inline_data:{mime_type:'audio/wav',data:wavB64}}]}],
-      generationConfig:{temperature:0,responseMimeType:'application/json'}})});
-  if(!res.ok){ const t=await res.text(); const err=new Error(res.status===429?'Gemini is busy (too many tries). Wait a few seconds.':res.status+': '+t.slice(0,140)); err.status=res.status; throw err; }
-  const j=await res.json();
-  const txt=j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'{}';
-  return JSON.parse(txt.replace(/```json|```/g,'').trim());
+  return gemRequest([{text:prompt},{inline_data:{mime_type:'audio/wav',data:wavB64}}]);
 }
 
 // ---------- Gemini listening: hear when I speak, record, send ----------
@@ -372,7 +424,7 @@ function gFrame(buf){
     G.rec.push(buf);
     G.quiet = v<stopT ? G.quiet+frameSec : 0;
     const len=G.rec.length*frameSec;
-    if(G.quiet>=0.95 || len>14){ const chunks=G.rec; G.rec=[]; G.speaking=false; G.loud=0;
+    if(G.quiet>=0.7 || len>14){ const chunks=G.rec; G.rec=[]; G.speaking=false; G.loud=0;
       if(len-G.quiet>0.35) gSend(chunks); else setStatus('Listening (Gemini)… say it in English',true); }
   }
 }
@@ -390,7 +442,8 @@ function toWav(chunks, inRate){
   return btoa(bin);
 }
 async function gSend(chunks){
-  if(!cur) return; const forN=cur.n; G.sending=true; setStatus('Checking…',true); setVerdict('');
+  if(!cur) return; const forN=cur.n; G.sending=true; setVerdict(''); const t0=Date.now(); setStatus('Checking…',true);
+  const tick=setInterval(()=>setStatus('Checking… '+Math.round((Date.now()-t0)/1000)+'s',true),500);
   try{
     const r=await geminiListen(toWav(chunks,G.rate), cur.ur, cur.en);
     if(!cur||cur.n!==forN) return;
@@ -398,23 +451,28 @@ async function gSend(chunks){
     if(!heard){ setVerdict('I could not hear clear words. Please say it again.','bad'); return; }
     $('heard').innerHTML=markHeard(slots,w);
     if(w.join(' ')==='skip'){ advance('skip'); return; }
-    if(matches(slots,w)){ setVerdict('✓ Exact!','good'); advance('ok'); return; }
+    if(closeEnough(slots,w)){ setVerdict(matches(slots,w)?'✓ Exact!':'✓ Close enough!','good'); advance('ok'); return; }
     if(cfg.gemOn && r.correct){ advance('ok',true); return; }
     setVerdict('✗ Not quite. '+(r.tip||'Try again.'),'bad');
   }catch(e){ setVerdict(e.message,'bad'); }
-  finally{ G.sending=false; if(G.on) setStatus('Listening (Gemini)… say it in English',true); }
+  finally{ clearInterval(tick); G.sending=false; if(G.on) setStatus('Listening (Gemini)… say it in English',true); }
 }
 
 // ---------- phone speech ----------
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 let rec=null, wantOn=false, wakeLock=null, baseIndex=0, lastFinal='', restartTimer=null;
 function setStatus(t,on){ $('status').textContent=t; $('heardBox').classList.toggle('listening',!!on); }
-function markNewSentence(){ baseIndex = rec && rec._len ? rec._len : 0; lastFinal=''; if(wantOn && !rec) startRec(); if(G.on) setStatus('Listening (Gemini)… say it in English',true); }
+let consumed=0;   // words already used from a result that is still growing
+function trimText(t,k){ return k? t.trim().split(/\s+/).slice(k).join(' ') : t; }
+function markNewSentence(){
+  if(rec && rec._len && rec._lastInterim){ baseIndex=rec._len-1; consumed=rec._lastText.trim().split(/\s+/).length; }
+  else { baseIndex = rec && rec._len ? rec._len : 0; consumed=0; }
+  lastFinal=''; if(wantOn && !rec) startRec(); if(G.on) setStatus('Listening (Gemini)… say it in English',true); }
 
 function startRec(){
   if(!SR||!wantOn) return;
   if(rec){ rec.onend=null; rec.onresult=null; rec.onerror=null; try{rec.abort();}catch(e){} }
-  const r=new SR(); rec=r; r._len=0; baseIndex=0;
+  const r=new SR(); rec=r; r._len=0; baseIndex=0; consumed=0;
   r.lang=cfg.lang; r.interimResults=true; r.maxAlternatives=5; r.continuous=false;
   r.onstart=()=>setStatus('Listening (phone)… say it in English',true);
   r.onresult=e=>onResult(e);
@@ -427,20 +485,21 @@ function startRec(){
   try{ r.start(); }catch(e){ clearTimeout(restartTimer); restartTimer=setTimeout(startRec,300); }
 }
 function onResult(e){
-  rec._len=e.results.length;
+  rec._len=e.results.length; { const lr=e.results[e.results.length-1]; rec._lastInterim=!lr.isFinal; rec._lastText=lr[0].transcript; }
+  const txt=(i,a)=> i===baseIndex ? trimText(e.results[i][a].transcript, consumed) : e.results[i][a].transcript;
   if(!cur||busy) return;
   // collect what was said since this sentence appeared
   let finals=[], interim='';
   for(let i=baseIndex;i<e.results.length;i++){
     const r=e.results[i];
-    if(r.isFinal) finals.push(r[0].transcript); else interim+=' '+r[0].transcript;
+    if(r.isFinal) finals.push(txt(i,0)); else interim+=' '+txt(i,0);
   }
   const candidates=new Set();
   for(let i=Math.max(baseIndex,e.resultIndex);i<e.results.length;i++){
     const r=e.results[i];
     for(let a=0;a<r.length;a++){
-      candidates.add(r[a].transcript);
-      if(finals.length) candidates.add(finals.slice(-1)[0]+' '+r[a].transcript); // sentence split over two pieces
+      candidates.add(txt(i,a));
+      if(finals.length) candidates.add(finals.slice(-1)[0]+' '+txt(i,a)); // sentence split over two pieces
     }
   }
   const joined=(finals.slice(-2).join(' ')+' '+interim).trim();
@@ -449,10 +508,10 @@ function onResult(e){
     const w=spokenWords(c), k=w.join(' ');
     if(k==='skip'||k.endsWith(' skip')){ if(e.results[e.results.length-1].isFinal){ advance('skip'); return; } }
     if(/(^| )(show words|show answer)$/.test(k)){ showWords(); }
-    if(matches(slots,w)){ $('heard').innerHTML=markHeard(slots,w); setVerdict('✓ Exact!','good'); advance('ok'); return; }
+    if(closeEnough(slots,w)){ $('heard').innerHTML=markHeard(slots,w); setVerdict(matches(slots,w)?'✓ Exact!':'✓ Close enough!','good'); advance('ok'); return; }
   }
   const lastR=e.results[e.results.length-1];
-  $('heard').innerHTML=markHeard(slots,spokenWords(lastR[0].transcript));
+  $('heard').innerHTML=markHeard(slots,spokenWords(e.results.length-1>=baseIndex? txt(e.results.length-1,0):''));
   // when a phrase is finished and not exact, ask Gemini about the meaning
   const last=e.results[e.results.length-1];
   if(last.isFinal){ const said=finals.slice(-1)[0]; if(said && said!==lastFinal){ lastFinal=said; checkWithGemini(said); } }
@@ -482,11 +541,11 @@ $('card').onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); t
 function fillMenu(){
   $('sDone').textContent=Object.keys(st.done).length; $('sSkip').textContent=Object.keys(st.skipped).length;
   $('sLeft').textContent=Math.max(0,st.queue.length-st.pos); $('sRounds').textContent=st.round;
-  $('engSel').value=cfg.engine; $('langSel').value=cfg.lang; $('gemOn').checked=cfg.gemOn; $('gemKey').value=cfg.gemKey; $('gemModel').value=cfg.gemModel; $('gemTestOut').textContent='';
+  $('strictSel').value=cfg.strict; $('engSel').value=cfg.engine; $('langSel').value=cfg.lang; $('gemOn').checked=cfg.gemOn; $('gemKey').value=cfg.gemKey; $('gemModel').value=cfg.gemModel; $('gemTestOut').textContent='';
 }
 function readMenu(){
   const old=cfg.lang+cfg.engine+cfg.gemKey;
-  cfg.engine=$('engSel').value; cfg.lang=$('langSel').value; cfg.gemOn=$('gemOn').checked; cfg.gemKey=$('gemKey').value.trim(); cfg.gemModel=$('gemModel').value.trim()||'gemini-flash-latest';
+  cfg.engine=$('engSel').value; cfg.strict=$('strictSel').value; cfg.lang=$('langSel').value; cfg.gemOn=$('gemOn').checked; cfg.gemKey=$('gemKey').value.trim(); cfg.gemModel=$('gemModel').value.trim()||'gemini-flash-lite-latest';
   lset(SKEY,cfg); return old!==cfg.lang+cfg.engine+cfg.gemKey;
 }
 function closeMenuAnd(fn){ const langChanged=readMenu(); $('menuScreen').hidden=true; if(fn) fn(); if(!cur) show(); if(langChanged || (!wantOn && !G.on)) startListening(); }
